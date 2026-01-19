@@ -456,6 +456,7 @@ The Indexer Agent extracts and categorizes information from every conversation:
 
 | Agent | Purpose | Status |
 |-------|---------|--------|
+| **DataLayerService** | Bridges agents to storage (PostgreSQL, Qdrant) | **COMPLETE** |
 | **Indexer Agent** | Ingests data, generates embeddings, maintains indexes | PLANNED |
 | **Search Agent** | Retrieves context for all other agents | PLANNED |
 | **Email Agent** | Analyzes emails, drafts replies | PARTIAL |
@@ -1190,6 +1191,7 @@ MSTR, TSLA, NVDA, PLTR, NUKZ, ALB, MP, POWL, TREE, ULTA, BTC
 | 1.0 | January 2025 | Dave Loeffel + Claude | Initial specification |
 | 2.0 | January 2026 | Dave Loeffel + Claude | Implementation progress documented; Technology stack updated (FastAPI, Docker); Directory structure populated; Setup checklist updated; Testing criteria updated; Module specifications annotated with status |
 | 2.1 | January 2026 | Dave Loeffel + Claude | **Architecture refactor:** Introduced three-layer agent architecture; Created [sage-agent-architecture.md](sage-agent-architecture.md); Updated Section 2 (System Architecture), Section 4 (Data Layer), Section 5 (Sub-Agents) to reference architecture doc; Removed duplicated content; Added conversation memory and Indexer/Search Agent concepts |
+| 2.2 | January 18, 2026 | Dave Loeffel + Claude | **DataLayerService complete:** Implemented concrete DataLayerService with entity adapters (email, contact, followup, meeting, generic); Created sage_entities Qdrant collection; Added indexed_entities and entity_relationships tables; 21 unit tests passing; Initial commit to GitHub (github.com/DaveLoeffel/sage-app) |
 
 ---
 
@@ -1198,7 +1200,8 @@ MSTR, TSLA, NVDA, PLTR, NUKZ, ALB, MP, POWL, TREE, ULTA, BTC
 | Document | Purpose |
 |----------|---------|
 | [sage-agent-architecture.md](sage-agent-architecture.md) | Detailed three-layer architecture, agent specifications, data schemas, implementation guide |
-| *sage-implementation-roadmap.md* | Session-by-session implementation plan (to be created) |
+| [sage-implementation-roadmap.md](sage-implementation-roadmap.md) | Session-by-session implementation plan with detailed progress tracking |
+| [GitHub Repository](https://github.com/DaveLoeffel/sage-app) | Source code repository |
 
 ---
 

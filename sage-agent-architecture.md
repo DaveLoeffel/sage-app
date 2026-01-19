@@ -1,9 +1,10 @@
 # Sage Agent Architecture
 ## Three-Layer Multi-Agent System Design
 
-**Version:** 1.0
+**Version:** 1.1
 **Created:** January 2026
-**Status:** Draft for Review
+**Last Updated:** January 18, 2026
+**Status:** Implementation In Progress
 
 ---
 
@@ -425,6 +426,49 @@ class DataLayerInterface:
     async def structured_query(self, filters: dict, entity_type: str) -> list[IndexedEntity]
     async def get_relationships(self, entity_id: str, rel_types: list) -> list[Relationship]
 ```
+
+### 2.4 DataLayerService Implementation ✅ COMPLETE
+
+The concrete `DataLayerService` class implements `DataLayerInterface` using a hybrid adapter approach:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    DataLayerService                         │
+│            (implements DataLayerInterface)                  │
+├─────────────────────────────────────────────────────────────┤
+│  Entity Adapters        │  Vector Service     │  Relationships │
+│  ───────────────────    │  ─────────────────  │  ────────────  │
+│  EmailAdapter           │  Multi-entity       │  entity_       │
+│  ContactAdapter         │  Qdrant collection  │  relationships │
+│  FollowupAdapter        │  "sage_entities"    │  table         │
+│  MeetingAdapter         │                     │                │
+│  GenericAdapter         │                     │                │
+└─────────────────────────────────────────────────────────────┘
+         │                        │                    │
+         ▼                        ▼                    ▼
+   PostgreSQL              Qdrant                PostgreSQL
+   (existing models)       (sage_entities)       (relationships)
+```
+
+**Key Design:**
+- Preserves existing SQLAlchemy models (EmailCache, Contact, Followup, MeetingNote)
+- Uses adapters to convert between models and `IndexedEntity`
+- New `indexed_entities` table for generic types (memory, event, fact)
+- New `entity_relationships` table for relationship storage
+- Single Qdrant collection `sage_entities` with entity_type filtering
+
+**Entity ID Format:**
+| Type | Format | Example |
+|------|--------|---------|
+| email | `email_{gmail_id}` | `email_18d9a7b3f2c1e4d5` |
+| contact | `contact_{db_id}` | `contact_42` |
+| followup | `followup_{db_id}` | `followup_127` |
+| meeting | `meeting_{fireflies_id}` | `meeting_ff_abc123` |
+| memory | `memory_{uuid}` | `memory_550e8400...` |
+| event | `event_{calendar_id}` | `event_abc123xyz` |
+| fact | `fact_{uuid}` | `fact_550e8400...` |
+
+**Location:** `sage/backend/sage/services/data_layer/`
 
 ---
 
