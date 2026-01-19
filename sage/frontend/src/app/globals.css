@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 152 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 152 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 152 84% 4.9%;
+    --primary: 152 47.4% 11.2%;
+    --primary-foreground: 150 40% 98%;
+    --secondary: 150 40% 96.1%;
+    --secondary-foreground: 152 47.4% 11.2%;
+    --muted: 150 40% 96.1%;
+    --muted-foreground: 152 16.3% 46.9%;
+    --accent: 150 40% 96.1%;
+    --accent-foreground: 152 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 150 40% 98%;
+    --border: 152 31.8% 91.4%;
+    --input: 152 31.8% 91.4%;
+    --ring: 152 84% 4.9%;
+    --radius: 0.5rem;
+
+    /* Sage brand colors */
+    --sage-50: 150 40% 96%;
+    --sage-100: 150 40% 90%;
+    --sage-200: 152 35% 80%;
+    --sage-300: 152 35% 65%;
+    --sage-400: 152 35% 50%;
+    --sage-500: 152 45% 35%;
+    --sage-600: 152 50% 25%;
+    --sage-700: 152 55% 18%;
+    --sage-800: 152 60% 12%;
+    --sage-900: 152 65% 8%;
+    --sage-950: 152 70% 5%;
+  }
+
+  .dark {
+    --background: 152 84% 4.9%;
+    --foreground: 150 40% 98%;
+    --card: 152 84% 4.9%;
+    --card-foreground: 150 40% 98%;
+    --popover: 152 84% 4.9%;
+    --popover-foreground: 150 40% 98%;
+    --primary: 150 40% 98%;
+    --primary-foreground: 152 47.4% 11.2%;
+    --secondary: 152 32.6% 17.5%;
+    --secondary-foreground: 150 40% 98%;
+    --muted: 152 32.6% 17.5%;
+    --muted-foreground: 150 20.2% 65.1%;
+    --accent: 152 32.6% 17.5%;
+    --accent-foreground: 150 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 150 40% 98%;
+    --border: 152 32.6% 17.5%;
+    --input: 152 32.6% 17.5%;
+    --ring: 150 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

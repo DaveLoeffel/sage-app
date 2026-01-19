@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="56" fill="#14532d"/>
+
+  <!-- Owl body/head shape -->
+  <ellipse cx="60" cy="65" rx="38" ry="40" fill="#166534"/>
+
+  <!-- Ear tufts -->
+  <path d="M28 35 L38 55 L25 50 Z" fill="#166534"/>
+  <path d="M92 35 L82 55 L95 50 Z" fill="#166534"/>
+
+  <!-- Face disc - lighter inner area -->
+  <ellipse cx="60" cy="62" rx="30" ry="32" fill="#15803d"/>
+
+  <!-- Left eye socket -->
+  <circle cx="45" cy="55" r="14" fill="#052e16"/>
+  <!-- Right eye socket -->
+  <circle cx="75" cy="55" r="14" fill="#052e16"/>
+
+  <!-- Left eye -->
+  <circle cx="45" cy="55" r="10" fill="#f0fdf4"/>
+  <!-- Right eye -->
+  <circle cx="75" cy="55" r="10" fill="#f0fdf4"/>
+
+  <!-- Left pupil -->
+  <circle cx="47" cy="55" r="5" fill="#052e16"/>
+  <!-- Right pupil -->
+  <circle cx="77" cy="55" r="5" fill="#052e16"/>
+
+  <!-- Left eye highlight -->
+  <circle cx="44" cy="53" r="2" fill="#fff"/>
+  <!-- Right eye highlight -->
+  <circle cx="74" cy="53" r="2" fill="#fff"/>
+
+  <!-- Beak -->
+  <path d="M60 65 L54 75 L60 82 L66 75 Z" fill="#fbbf24"/>
+
+  <!-- Chest feathers pattern -->
+  <path d="M45 85 Q60 95 75 85" stroke="#22c55e" stroke-width="2" fill="none"/>
+  <path d="M48 90 Q60 98 72 90" stroke="#22c55e" stroke-width="2" fill="none"/>
+  <path d="M51 95 Q60 101 69 95" stroke="#22c55e" stroke-width="2" fill="none"/>
+
+  <!-- Eyebrow feathers for wise look -->
+  <path d="M32 45 Q45 42 50 48" stroke="#052e16" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M88 45 Q75 42 70 48" stroke="#052e16" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+</svg>
