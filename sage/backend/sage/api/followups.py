@@ -7,20 +7,33 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sage.services.database import get_db
+from sage.services.database import get_db, async_session_maker
 from sage.models.followup import Followup, FollowupStatus, FollowupPriority
+from sage.models.email import EmailCache
 from sage.models.user import User
 from sage.schemas.followup import (
     FollowupCreate,
     FollowupUpdate,
     FollowupResponse,
     FollowupListResponse,
+    FollowupDetectionProgress,
+    WaitingThreadResponse,
+    DailyReviewItem,
+    SourceEmailSummary,
 )
+from sage.schemas.email import DraftReplyResponse
+from sage.core.claude_agent import get_claude_agent
 
 router = APIRouter()
 
+# In-memory storage for detection progress
+_detection_progress: dict[str, FollowupDetectionProgress] = {}
 
-def compute_followup_response(followup: Followup) -> FollowupResponse:
+
+def compute_followup_response(
+    followup: Followup,
+    source_email: EmailCache | None = None,
+) -> FollowupResponse:
     """Compute additional fields for followup response."""
     now = datetime.utcnow()
     is_overdue = followup.status in [FollowupStatus.PENDING, FollowupStatus.REMINDED] and followup.due_date < now
@@ -29,6 +42,20 @@ def compute_followup_response(followup: Followup) -> FollowupResponse:
     response = FollowupResponse.model_validate(followup)
     response.is_overdue = is_overdue
     response.days_until_due = days_until_due
+
+    # Add source email summary if available
+    if source_email:
+        response.source_email = SourceEmailSummary(
+            id=source_email.id,
+            gmail_id=source_email.gmail_id,
+            subject=source_email.subject,
+            sender_email=source_email.sender_email,
+            sender_name=source_email.sender_name,
+            received_at=source_email.received_at,
+            snippet=source_email.snippet,
+            body_text=source_email.body_text,
+        )
+
     return response
 
 
@@ -83,6 +110,145 @@ async def list_followups(
     )
 
 
+# =============================================================================
+# DETECTION ENDPOINTS (must come before parametric routes)
+# =============================================================================
+
+@router.post("/detect", response_model=dict)
+async def detect_followups(
+    user_email: str = Query(..., description="User's email address"),
+    months_back: int = Query(6, ge=1, le=12, description="Months of history to analyze"),
+    use_ai: bool = Query(True, description="Use AI for ambiguous classifications"),
+    seed_tracker: bool = Query(True, description="Create Followup records from detection"),
+    max_followups: int = Query(100, ge=1, le=500, description="Max followups to create"),
+) -> dict:
+    """
+    Detect email threads where user is waiting for a response.
+
+    Analyzes sent emails to find threads awaiting response using:
+    - Heuristic classification (fast, free)
+    - AI classification for ambiguous cases (optional)
+
+    Timing rules for suggested actions:
+    - 1 business day: draft follow-up
+    - 3 business days: send additional follow-up
+    - 5+ business days: call + follow-up
+
+    Can optionally seed the Followup tracker with detected threads.
+    """
+    import asyncio
+    from sage.services.followup_detector import FollowupPatternDetector
+
+    detection_id = f"detect_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    _detection_progress[detection_id] = FollowupDetectionProgress(
+        status="running",
+        phase="initializing",
+        percent_complete=0,
+    )
+
+    async def run_detection():
+        # Create a new database session for the background task
+        # (the request session is invalid after the request returns)
+        async with async_session_maker() as session:
+            try:
+                def progress_callback(phase: str, percent: int):
+                    _detection_progress[detection_id] = FollowupDetectionProgress(
+                        status="running",
+                        phase=phase,
+                        percent_complete=percent,
+                    )
+
+                detector = FollowupPatternDetector(user_email)
+                result = await detector.detect(
+                    session,
+                    months_back=months_back,
+                    use_ai=use_ai,
+                    progress_callback=progress_callback,
+                )
+
+                followups_created = 0
+                if seed_tracker:
+                    # Get user
+                    user_result = await session.execute(select(User).limit(1))
+                    user = user_result.scalar_one_or_none()
+
+                    if user:
+                        followups_created, _ = await detector.seed_followup_tracker(
+                            session, result, user.id, max_followups
+                        )
+                        await session.commit()
+
+                _detection_progress[detection_id] = FollowupDetectionProgress(
+                    status="completed",
+                    phase="complete",
+                    percent_complete=100,
+                    threads_analyzed=result.threads_analyzed,
+                    waiting_threads_found=len(result.waiting_threads),
+                    followups_created=followups_created,
+                    message=f"Found {len(result.waiting_threads)} threads awaiting response. "
+                           f"Created {followups_created} followup records.",
+                )
+
+            except Exception as e:
+                _detection_progress[detection_id] = FollowupDetectionProgress(
+                    status="failed",
+                    phase="error",
+                    percent_complete=0,
+                    error=str(e),
+                )
+                raise
+
+    asyncio.create_task(run_detection())
+
+    return {
+        "detection_id": detection_id,
+        "message": "Follow-up detection started",
+        "status": "running",
+        "progress_url": f"/api/v1/followups/detect/{detection_id}",
+    }
+
+
+@router.get("/detect/{detection_id}", response_model=FollowupDetectionProgress)
+async def get_detection_progress(
+    detection_id: str,
+) -> FollowupDetectionProgress:
+    """Get the progress of a follow-up detection operation."""
+    if detection_id not in _detection_progress:
+        raise HTTPException(status_code=404, detail="Detection not found")
+
+    return _detection_progress[detection_id]
+
+
+@router.get("/daily-review", response_model=list[DailyReviewItem])
+async def get_daily_review(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[DailyReviewItem]:
+    """
+    Get follow-up items for daily review with contact phone numbers.
+
+    Returns pending/reminded followups sorted by urgency,
+    with suggested actions and contact phone numbers for calling.
+    """
+    from sage.services.followup_detector import FollowupPatternDetector
+    from sage.models.contact import Contact
+
+    # Get user
+    user_result = await db.execute(select(User).limit(1))
+    user = user_result.scalar_one_or_none()
+
+    if not user:
+        return []
+
+    detector = FollowupPatternDetector(user.email)
+    items = await detector.get_daily_review_items(db, user.id)
+
+    return [DailyReviewItem(**item) for item in items]
+
+
+# =============================================================================
+# STANDARD FOLLOWUP ENDPOINTS
+# =============================================================================
+
 @router.get("/overdue", response_model=list[FollowupResponse])
 async def get_overdue_followups(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -129,14 +295,29 @@ async def get_followup(
     followup_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> FollowupResponse:
-    """Get a specific follow-up by ID."""
+    """Get a specific follow-up by ID with source email data."""
     result = await db.execute(select(Followup).where(Followup.id == followup_id))
     followup = result.scalar_one_or_none()
 
     if not followup:
         raise HTTPException(status_code=404, detail="Follow-up not found")
 
-    return compute_followup_response(followup)
+    # Fetch source email if email_id is set
+    source_email = None
+    if followup.email_id:
+        email_result = await db.execute(
+            select(EmailCache).where(EmailCache.id == followup.email_id)
+        )
+        source_email = email_result.scalar_one_or_none()
+
+    # If no email_id, try to find by gmail_id
+    if not source_email and followup.gmail_id:
+        email_result = await db.execute(
+            select(EmailCache).where(EmailCache.gmail_id == followup.gmail_id)
+        )
+        source_email = email_result.scalar_one_or_none()
+
+    return compute_followup_response(followup, source_email)
 
 
 @router.post("", response_model=FollowupResponse)
@@ -254,3 +435,53 @@ async def delete_followup(
     await db.commit()
 
     return {"message": "Follow-up deleted successfully"}
+
+
+@router.post("/{followup_id}/draft", response_model=DraftReplyResponse)
+async def generate_followup_draft(
+    followup_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DraftReplyResponse:
+    """
+    Generate a draft follow-up email for a followup item.
+
+    Uses Claude to generate a contextual follow-up reminder based on
+    the original email thread and how long we've been waiting.
+    """
+    # Fetch followup
+    result = await db.execute(select(Followup).where(Followup.id == followup_id))
+    followup = result.scalar_one_or_none()
+
+    if not followup:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+
+    # Fetch source email if available
+    source_email = None
+    if followup.email_id:
+        email_result = await db.execute(
+            select(EmailCache).where(EmailCache.id == followup.email_id)
+        )
+        source_email = email_result.scalar_one_or_none()
+
+    if not source_email and followup.gmail_id:
+        email_result = await db.execute(
+            select(EmailCache).where(EmailCache.gmail_id == followup.gmail_id)
+        )
+        source_email = email_result.scalar_one_or_none()
+
+    # Calculate days waiting
+    now = datetime.utcnow()
+    days_waiting = (now - followup.created_at).days
+
+    # Generate draft using Claude
+    agent = await get_claude_agent()
+    draft = await agent.generate_followup_email(
+        followup_subject=followup.subject,
+        contact_name=followup.contact_name,
+        contact_email=followup.contact_email,
+        days_waiting=days_waiting,
+        original_email_body=source_email.body_text if source_email else None,
+        notes=followup.notes,
+    )
+
+    return draft

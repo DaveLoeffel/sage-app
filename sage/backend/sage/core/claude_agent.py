@@ -393,6 +393,150 @@ Respond with just a JSON array like: ["action 1", "action 2"]""",
         # For now, return empty list
         return []
 
+    async def generate_followup_email(
+        self,
+        followup_subject: str,
+        contact_name: str | None,
+        contact_email: str,
+        days_waiting: int,
+        original_email_body: str | None,
+        notes: str | None = None,
+    ) -> DraftReplyResponse:
+        """Generate a follow-up reminder email for an unanswered thread."""
+        context_info = ""
+        if notes:
+            context_info = f"\nAdditional context: {notes}"
+
+        prompt = f"""Draft a follow-up email from Dave Loeffel to remind the recipient about a previous email that hasn't received a response.
+
+Original Email Context:
+Subject: {followup_subject}
+Recipient: {contact_name or contact_email} <{contact_email}>
+Days waiting for response: {days_waiting}
+{context_info}
+
+Original email content:
+{original_email_body or '[Original email not available]'}
+
+Instructions:
+- Write a polite, professional follow-up reminder
+- Reference the original email subject
+- Be friendly but clearly ask for a response or update
+- Keep it brief (2-3 short paragraphs max)
+- If it's been many days (7+), be slightly more urgent but still professional
+- Don't apologize excessively for following up
+
+Respond in JSON format:
+{{
+    "subject": "Re: ...",
+    "body": "...",
+    "confidence": 0.0-1.0,
+    "notes": "..." or null
+}}"""
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=2048,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        content = response.content[0].text
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start != -1 and end > start:
+                data = json.loads(content[start:end])
+            else:
+                raise ValueError("No JSON found")
+        except (json.JSONDecodeError, ValueError):
+            data = {
+                "subject": f"Following up: {followup_subject}",
+                "body": "Unable to generate follow-up draft.",
+                "confidence": 0.0,
+            }
+
+        return DraftReplyResponse(
+            subject=data.get("subject", f"Following up: {followup_subject}"),
+            body=data.get("body", ""),
+            suggested_attachments=data.get("suggested_attachments"),
+            confidence=data.get("confidence", 0.5),
+            notes=data.get("notes"),
+        )
+
+    async def generate_todo_response(
+        self,
+        todo_title: str,
+        todo_category: str,
+        contact_name: str | None,
+        contact_email: str | None,
+        source_email_subject: str | None,
+        source_email_body: str | None,
+        todo_description: str | None = None,
+    ) -> DraftReplyResponse:
+        """Generate a response email for a todo item (request received or commitment made)."""
+        category_context = {
+            "request_received": "Someone has requested Dave to do something. Draft a response acknowledging the request and providing an update or completion status.",
+            "commitment_made": "Dave committed to doing something. Draft a response following up on that commitment with status or completion.",
+        }
+
+        prompt = f"""Draft an email from Dave Loeffel responding to a task/request.
+
+Task Context:
+Title: {todo_title}
+Type: {todo_category} - {category_context.get(todo_category, 'Respond appropriately to this task.')}
+{f'Description: {todo_description}' if todo_description else ''}
+{f'Contact: {contact_name or contact_email}' if contact_email else ''}
+
+{f'''Original Email:
+Subject: {source_email_subject}
+Body: {source_email_body or '[Not available]'}''' if source_email_subject else ''}
+
+Instructions:
+- Write a professional, friendly response
+- If it's a request received: acknowledge the request, provide status/completion
+- If it's a commitment made: follow up on the promise with an update
+- Keep it concise and actionable
+- Include clear next steps if applicable
+
+Respond in JSON format:
+{{
+    "subject": "Re: ..." or "Update: ...",
+    "body": "...",
+    "confidence": 0.0-1.0,
+    "notes": "..." or null
+}}"""
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=2048,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        content = response.content[0].text
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start != -1 and end > start:
+                data = json.loads(content[start:end])
+            else:
+                raise ValueError("No JSON found")
+        except (json.JSONDecodeError, ValueError):
+            data = {
+                "subject": f"Update: {todo_title}",
+                "body": "Unable to generate response draft.",
+                "confidence": 0.0,
+            }
+
+        return DraftReplyResponse(
+            subject=data.get("subject", f"Update: {todo_title}"),
+            body=data.get("body", ""),
+            suggested_attachments=data.get("suggested_attachments"),
+            confidence=data.get("confidence", 0.5),
+            notes=data.get("notes"),
+        )
+
 
 # Singleton instance
 _agent: ClaudeAgent | None = None
