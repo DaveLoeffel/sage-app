@@ -79,10 +79,10 @@ export default function CalendarPage() {
                     }`}
                   >
                     <span className="text-xs font-medium uppercase">
-                      {new Date(date).toLocaleDateString('en-US', { weekday: 'short' })}
+                      {new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
                     </span>
                     <span className="text-lg font-bold">
-                      {new Date(date).getDate()}
+                      {new Date(date + 'T00:00:00').getDate()}
                     </span>
                   </div>
                   <div>
@@ -125,6 +125,14 @@ export default function CalendarPage() {
   )
 }
 
+// Format date as YYYY-MM-DD in local timezone (not UTC)
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function groupEventsByDate(events: CalendarEvent[], daysToShow: number) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -140,7 +148,8 @@ function groupEventsByDate(events: CalendarEvent[], daysToShow: number) {
   for (let i = 0; i < daysToShow; i++) {
     const date = new Date(today)
     date.setDate(date.getDate() + i)
-    const dateStr = date.toISOString().split('T')[0]
+    // Use local date format to avoid UTC timezone shift
+    const dateStr = formatLocalDate(date)
 
     let dateLabel: string
     if (i === 0) {
@@ -166,7 +175,8 @@ function groupEventsByDate(events: CalendarEvent[], daysToShow: number) {
   // Assign events to their respective dates
   for (const event of events) {
     const eventDate = new Date(event.start)
-    const eventDateStr = eventDate.toISOString().split('T')[0]
+    // Use local date format to match events correctly
+    const eventDateStr = formatLocalDate(eventDate)
 
     const dayEntry = result.find((d) => d.date === eventDateStr)
     if (dayEntry) {

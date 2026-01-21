@@ -1,9 +1,9 @@
 # Sage Implementation Roadmap
 ## Session-by-Session Progress Tracker
 
-**Last Updated:** January 18, 2026
-**Current Phase:** Foundational Agents (Phase 3)
-**Next Session Focus:** Implement SearchAgent with DataLayerService
+**Last Updated:** January 20, 2026
+**Current Phase:** Foundational Agents (Phase 3.8)
+**Next Session Focus:** Clarifier Agent Implementation OR Sage Orchestrator (Phase 4)
 
 ---
 
@@ -15,12 +15,19 @@
 | Data Layer (existing) | OPERATIONAL | 80% |
 | Agent Infrastructure | **COMPLETE** | 100% |
 | DataLayerService | **COMPLETE** | 100% |
-| Indexer Agent | STUBBED | 10% |
-| Search Agent | STUBBED | 10% |
+| Indexer Agent | **COMPLETE** | 100% |
+| Search Agent | **COMPLETE** | 100% |
+| Historical Data Import | **COMPLETE** | 100% |
+| Behavioral Analysis | **COMPLETE** | 100% |
+| Voice Profile Training | **COMPLETE** | 100% |
+| Follow-up Detection | **COMPLETE** | 100% |
 | Sage Orchestrator | STUBBED | 10% |
-| Task Agents (8) | STUBBED | 15% |
-| Unit Tests (base + data layer) | **COMPLETE** | 100% |
-| Frontend Dashboard | PARTIAL | 60% |
+| Task Agents (10) | STUBBED | 15% |
+| TodoList Agent | **COMPLETE** | 100% |
+| Meeting Review Service | **COMPLETE** | 100% |
+| Clarifier Agent | PLANNED | 0% |
+| Unit Tests (base + data layer + search) | **COMPLETE** | 100% |
+| Frontend Dashboard | PARTIAL | 75% |
 
 ---
 
@@ -47,17 +54,208 @@
 - [x] Create database migration for `indexed_entities` and `entity_relationships`
 - [x] Write unit tests for DataLayerService (21 tests passing)
 
-### Phase 3: Foundational Agents
-- [ ] Implement `IndexerAgent`
-  - [ ] Email indexing (refactor from existing)
-  - [ ] Conversation memory indexing
-  - [ ] Fact extraction
-  - [ ] Supersession handling
-- [ ] Implement `SearchAgent`
-  - [ ] Semantic search (refactor from existing)
-  - [ ] Task-based context retrieval
-  - [ ] Agent-specific enrichment
-  - [ ] Memory retrieval
+### Phase 3: Foundational Agents ✅ COMPLETE
+- [x] Implement `IndexerAgent` ✅ COMPLETE (Phase 3.6.5)
+  - [x] Email indexing (refactor from existing)
+  - [x] Conversation memory indexing
+  - [x] Fact extraction
+  - [x] Supersession handling
+- [x] Implement `SearchAgent` ✅ COMPLETE
+  - [x] Semantic search (refactor from existing)
+  - [x] Task-based context retrieval (`search_for_task`)
+  - [x] Agent-specific enrichment
+  - [x] Memory retrieval (`get_relevant_memories`)
+  - [x] Relationship traversal
+  - [x] Temporal search
+  - [x] Convenience methods (`get_contact_context`, `get_thread_context`)
+  - [x] Unit tests (36 tests passing)
+
+### Phase 3.5: Historical Data Import & Training 🆕 NEXT
+**Goal:** Build a comprehensive email corpus for priority learning, follow-up detection, and voice training.
+
+#### 3.5.1 Bulk Email Import
+- [x] Create bulk import endpoint (`/emails/bulk-import`)
+- [x] Implement tiered indexing strategy:
+  - **Tier 1 - Full Corpus (50K emails):** Metadata + vector embeddings only (no AI analysis)
+  - **Tier 2 - Active Window (recent 90 days):** Full AI analysis (priority, category, summary)
+  - **Tier 3 - Voice Corpus (sent emails):** Style extraction for voice training
+- [x] Implement pagination for Gmail API (handle 50K+ emails)
+- [x] Add progress tracking/reporting for long-running import
+- [x] Include INBOX, SENT, and custom labels (e.g., "Signal") in import
+- [x] Test with real Gmail account
+- [x] Full import completed: 80,369 emails, 0 errors
+- [x] Actual time: ~8 hours for 85K emails
+
+#### 3.5.2 Behavioral Analysis ✅ COMPLETE
+- [x] Analyze response patterns:
+  - Emails user replied to quickly → high priority signals
+  - Emails user starred/labeled → importance indicators
+  - Senders user always responds to → VIP contacts
+- [x] Build VIP sender list from historical data (397 VIP contacts identified)
+- [x] Extract priority keywords from acted-upon emails (100 keywords extracted)
+- [x] Store behavioral insights in `indexed_entities` (type: `insight`)
+- [x] Create API endpoints for behavioral analysis
+- [ ] **USER REVIEW:** Review and curate VIP contacts list (397 contacts)
+
+#### 3.5.3 Voice Profile Extraction ✅ COMPLETE
+- [x] Analyze sent emails corpus for:
+  - Greeting styles (formal vs casual, by recipient type)
+  - Sign-off patterns
+  - Vocabulary and phrase patterns
+  - Formality levels by context
+  - Typical email structure
+- [x] Generate voice profile document
+- [x] Store as reference for Draft Agent
+- [x] Create API endpoint to view/update voice profile
+- [x] Filter out automated emails (calendar, transcripts, etc.)
+
+#### 3.5.4 Follow-up Pattern Detection ✅ COMPLETE
+- [x] Identify threads where user sent last message with no reply
+- [x] Implement hybrid heuristics + AI classification for "expects response"
+- [x] Analyze typical follow-up timing patterns (business days)
+- [x] Detect "waiting for response" situations in historical data (125 found)
+- [x] Seed initial follow-ups from historical analysis
+- [x] Add phone numbers to daily review items
+- [x] Create API endpoints: `/followups/detect`, `/followups/daily-review`
+
+### Phase 3.6: TodoList Agent Implementation ✅ COMPLETE
+**Goal:** Implement agent to scan emails and meetings for action items and maintain a comprehensive todo list.
+
+#### 3.6.1 TodoList Agent Core ✅ COMPLETE
+- [x] Create `services/todo_detector.py` with full implementation
+- [x] Implement `detect_todos` capability:
+  - Self-reminder detection (emails to self, "Reminder:" prefix)
+  - Request detection (questions, "can you", "please")
+  - Commitment detection (Dave's sent emails with "I'll", "I will")
+  - Meeting action detection (from Fireflies and Plaud transcripts)
+- [x] Implement `list_todos` capability with grouping (due today, due this week, overdue)
+- [x] Implement `complete_todo` and `snooze_todo` capabilities in model
+
+#### 3.6.2 TodoList Database & API ✅ COMPLETE
+- [x] Create Alembic migration for `todo_items` table (migration 005):
+  - id, title, description, category, priority, status
+  - due_date, source_type, source_id, source_summary
+  - contact_name, contact_email, created_at, completed_at, snoozed_until
+  - detection_confidence, detected_deadline_text
+- [x] Create Pydantic schemas for TodoItem
+- [x] Create API endpoints (in frontend page)
+
+#### 3.6.3 Meeting Review Service ✅ COMPLETE
+- [x] Create `services/meeting_reviewer.py` with MeetingReviewService
+- [x] Implement AI-powered action item extraction from meetings
+- [x] Support Fireflies meeting transcripts
+- [x] Support Plaud recordings (email-based)
+- [x] Classify action items by type:
+  - TODO_FOR_DAVE: Dave needs to do this
+  - FOLLOWUP_EXPECTED: Dave waiting on someone
+  - TODO_FOR_OTHER: Someone else committed to do
+- [x] Create API endpoints:
+  - `POST /api/v1/meetings/review/all` - Review all meetings (last N days)
+  - `POST /api/v1/meetings/review/{meeting_id}` - Review single Fireflies meeting
+  - `POST /api/v1/meetings/review/plaud/{recording_id}` - Review single Plaud recording
+- [x] Create CLI script `scripts/run_meeting_review.py`
+- [x] Initial 30-day review completed:
+  - 22 meetings reviewed (10 Fireflies, 12 Plaud)
+  - 46 todos created
+  - 82 follow-ups created
+
+#### 3.6.4 Database Schema Update ✅ COMPLETE
+- [x] Create migration 006 to make followups.gmail_id nullable
+- [x] Add source_type and source_id columns to followups table
+- [x] Support meeting-based followups (no gmail_id required)
+- [x] Update Pydantic schemas to allow nullable gmail_id/thread_id
+- [x] Update FollowupResponse to include source_type and source_id fields
+
+### Phase 3.6.5: Indexer Agent Implementation ✅ COMPLETE
+**Goal:** Complete the foundational Indexer Agent that handles all data ingestion into Sage's Data Layer.
+
+**Detailed Plan:** See [indexer-agent-implementation-plan.md](indexer-agent-implementation-plan.md)
+
+#### 3.6.5.1 Core Infrastructure ✅
+- [x] Add DataLayerService and Claude imports to IndexerAgent
+- [x] Implement helper methods (entity ID generation, embedding text)
+- [x] Implement simple capabilities:
+  - [x] `delete_entity` - Direct DataLayerService call
+  - [x] `link_entities` - Create relationships via DataLayerService
+  - [x] `reindex_entity` - Delete + re-index existing entity
+
+#### 3.6.5.2 Email & Contact Indexing ✅
+- [x] Implement `index_email`:
+  - [x] Accept Gmail API response or EmailCache model
+  - [x] Parse headers, body, metadata into IndexedEntity
+  - [x] Store via DataLayerService (auto-creates embedding)
+  - [x] Optional AI analysis trigger
+- [x] Implement `index_contact`:
+  - [x] Accept contact data dict
+  - [x] Create/update via DataLayerService + ContactAdapter
+  - [x] Auto-link to related emails
+
+#### 3.6.5.3 Conversation Memory ✅
+- [x] Implement `index_memory`:
+  - [x] Store user_message + sage_response as memory entity
+  - [x] Extract facts, decisions, preferences via Claude
+  - [x] Generate embeddings for semantic retrieval
+  - [x] Link to mentioned contacts/projects
+- [x] Implement `extract_facts`:
+  - [x] Claude prompt for structured fact extraction
+  - [x] Return facts with type, confidence, entities_mentioned
+  - [x] Check for contradictions with existing facts
+- [x] Implement `supersede_fact`:
+  - [x] Mark old fact's metadata with `superseded_by`
+  - [x] Link new fact with `supersedes` reference
+  - [x] Maintain audit trail
+
+#### 3.6.5.4 Meeting & Event Indexing ✅
+- [x] Implement `index_meeting`:
+  - [x] Accept Fireflies transcript or raw data
+  - [x] Parse participants, action items, summary
+  - [x] Link to participant contacts
+- [x] Implement `index_event`:
+  - [x] Accept Google Calendar event data
+  - [x] Parse attendees, time, location
+  - [x] Link to attendee contacts
+- [x] Implement `index_document` (stub for now):
+  - [x] Google Drive integration (lower priority - stub created)
+
+#### 3.6.5.5 Integration & Testing ✅
+- [x] Refactor EmailProcessor to use IndexerAgent (optional parameter)
+- [x] Update chat API to call `index_memory` after exchanges (background task)
+- [x] Create unit tests (`tests/agents/test_indexer_agent.py`) - 35 tests passing
+- [x] Integration tests (`tests/integration/test_indexer_integration.py`) - 11 tests passing
+
+### Phase 3.8: Clarifier Agent Implementation
+**Goal:** Implement agent to detect ambiguous emails and draft clarifying responses.
+
+#### 3.8.1 Clarifier Agent Core
+- [ ] Create `agents/task/clarifier.py` with full implementation
+- [ ] Implement `detect_ambiguity` capability:
+  - Missing deadline detection ("soon", "later", no specific date)
+  - Unclear ownership detection ("someone", passive voice)
+  - Vague request detection ("help with", "thoughts on")
+  - Incomplete information detection
+- [ ] Implement ambiguity scoring (high/medium/low/clear)
+- [ ] Implement `generate_questions` capability
+- [ ] Implement `draft_clarification` capability (uses Draft Agent voice)
+- [ ] Create unit tests for Clarifier Agent
+
+#### 3.8.2 Clarifier Database & API
+- [ ] Create Alembic migration for `ambiguous_emails` table:
+  - id, email_id, ambiguity_level, triggers (JSON)
+  - suggested_questions (JSON), draft_id, status
+  - created_at, reviewed_at
+- [ ] Create Pydantic schemas for AmbiguousEmail
+- [ ] Create API endpoints:
+  - `GET /api/v1/clarifier/ambiguous` - List ambiguous emails
+  - `GET /api/v1/clarifier/ambiguous/{id}` - Get details
+  - `POST /api/v1/clarifier/analyze/{email_id}` - Analyze specific email
+  - `POST /api/v1/clarifier/draft/{email_id}` - Generate clarification draft
+  - `POST /api/v1/clarifier/dismiss/{id}` - Mark as not needing clarification
+
+#### 3.8.3 Clarifier Integration
+- [ ] Integrate with Email Agent (auto-flag ambiguous on analysis)
+- [ ] Integrate with Briefing Agent (include ambiguous emails needing review)
+- [ ] Add Clarifier section to frontend dashboard
+- [ ] Wire to email draft/send flow (human-in-the-loop)
 
 ### Phase 4: Sage Orchestrator
 - [ ] Implement intent recognition
@@ -70,6 +268,9 @@
 - [ ] Migrate Follow-Up Agent (from followup_tracker.py)
 - [ ] Migrate Email Agent (from claude_agent.py)
 - [ ] Migrate Briefing Agent (from briefing_generator.py)
+- [ ] Implement TodoList Agent (Phase 3.6) ✅ COMPLETE
+- [x] Implement Indexer Agent (Phase 3.6.5) ✅ COMPLETE
+- [ ] Implement Clarifier Agent (Phase 3.8)
 - [ ] Implement Meeting Agent
 - [ ] Implement Calendar Agent
 - [ ] Implement Draft Agent
@@ -352,9 +553,400 @@
 
 ---
 
+### Session 4: January 19, 2026
+**Duration:** ~2 hours
+**Focus:** SearchAgent Implementation + Email Sync Fixes + Data Strategy
+
+**Completed:**
+
+1. **Fixed Email Display Issues:**
+   - Changed default `unreadOnly` filter to `true` in emails page (only show unread by default)
+   - Fixed "Sync" button to actually call Gmail sync API instead of just refetching cache
+   - Added loading state and spinner during sync
+   - Fixed email sync to update `is_unread` and `labels` for existing emails (was skipping them)
+   - Cleared email database and resynced to fix stale unread counts
+
+2. **Implemented SearchAgent (Full Implementation):**
+   - `search_for_task` - Primary method for building context packages tailored to requesting agent
+   - `semantic_search` - Vector similarity search with score thresholding
+   - `entity_lookup` - Find entities by ID or structured filters
+   - `relationship_traverse` - Follow relationships between entities with direction info
+   - `temporal_search` - Query entities by time range
+   - `get_relevant_memories` - Retrieve conversation memories for continuity
+   - `get_contact_context` - Comprehensive contact info (emails, meetings, follow-ups)
+   - `get_thread_context` - Full email thread with participants and related follow-ups
+   - Agent-specific enrichment (followup agent gets pending followups, email agent gets unread, etc.)
+   - Deduplication to prevent duplicate entities in context
+   - Temporal summary generation
+
+3. **Created SearchAgent Unit Tests:**
+   - 36 comprehensive tests covering all capabilities
+   - Mock DataLayerInterface for isolated testing
+   - All tests passing
+
+4. **Discussed Data Strategy for Training:**
+   - Identified need for larger email corpus (up to 50K emails)
+   - Three training goals: priority understanding, follow-up tracking, voice training
+   - Designed tiered indexing strategy to avoid expensive AI analysis on all historical emails
+   - Added Phase 3.5 to roadmap for Historical Data Import & Training
+
+**Files Modified:**
+- `sage/frontend/src/app/emails/page.tsx` - Fixed unread filter default, fixed sync button
+- `sage/backend/sage/core/email_processor.py` - Fixed sync to update existing emails
+- `sage/backend/sage/agents/foundational/search.py` - Full implementation (~700 lines)
+
+**Files Created:**
+- `sage/backend/tests/agents/test_search_agent.py` - Unit tests (~550 lines, 36 tests)
+
+**Key Decisions:**
+- SearchAgent is the single point of data access for all sub-agents (as per architecture)
+- Tiered indexing for historical data: embeddings for all, AI analysis only for recent
+- Voice training will analyze sent emails to build style profile
+- Behavioral analysis will learn from response patterns, not just email content
+
+**Next Session Should:**
+1. Test bulk import with real Gmail account
+2. Begin behavioral analysis (Phase 3.5.2)
+3. Begin voice profile extraction from sent emails
+
+---
+
+### Session 5: January 19-20, 2026
+**Duration:** ~10 hours (including 8-hour import)
+**Focus:** Bulk Email Import Implementation & Execution (Phase 3.5.1)
+
+**Completed:**
+
+1. **Created Bulk Import Schemas:**
+   - `BulkImportRequest` - configuration for import (labels, max emails, active window)
+   - `BulkImportProgress` - detailed progress tracking with tier stats
+   - `ImportTierStats` - per-tier statistics
+   - `BulkImportResponse` - initial response with import ID
+
+2. **Implemented BulkEmailImporter Class:**
+   - Full pagination support for Gmail API (handles 85K+ emails)
+   - Deduplication across INBOX, SENT, and custom labels
+   - Three-tier processing:
+     - Tier 1: All emails → metadata + embeddings only
+     - Tier 2: Recent 90 days → full AI analysis
+     - Tier 3: Sent emails → flagged for voice training
+   - In-memory progress tracking
+   - Cost estimation (embeddings + AI analysis)
+   - Batch commits every 50 emails for performance
+
+3. **Created API Endpoints:**
+   - `POST /api/v1/emails/bulk-import` - Start bulk import
+   - `GET /api/v1/emails/bulk-import/{import_id}` - Get progress
+   - `GET /api/v1/emails/bulk-import` - List all imports
+
+4. **Bug Fixes During Import:**
+   - Fixed route ordering (bulk-import routes before /{email_id})
+   - Fixed pagination bug that stopped fetching after 792 IDs
+   - Fixed database truncation error for long subject lines (>500 chars)
+   - Added error recovery to continue after individual email failures
+
+5. **Executed Full Import:**
+   - **Total emails found:** 85,517 (INBOX + SENT + Signal)
+   - **New emails imported:** 80,369
+   - **Skipped (existing):** 5,148
+   - **Embeddings generated:** 80,369
+   - **AI analyses (90-day window):** 1,200
+   - **Voice corpus (sent):** 63,906
+   - **Errors:** 0
+   - **Duration:** ~8 hours
+
+**Files Modified:**
+- `sage/backend/sage/schemas/email.py` - Added bulk import schemas (~65 lines)
+- `sage/backend/sage/core/email_processor.py` - Added BulkEmailImporter class (~400 lines)
+- `sage/backend/sage/api/emails.py` - Added bulk import endpoints, fixed route order (~60 lines)
+
+**Key Design Decisions:**
+- Tiered indexing saved significant cost by only AI-analyzing recent emails
+- Custom labels supported via `include_labels` parameter (e.g., "Signal")
+- Field truncation prevents database errors on malformed emails
+- Error recovery ensures one bad email doesn't crash entire import
+
+**Next Session Should:**
+1. Implement behavioral analysis (Phase 3.5.2)
+2. Begin voice profile extraction from 63,906 sent emails
+3. Detect follow-up patterns from historical data
+
+---
+
+### Session 6: January 20, 2026
+**Duration:** ~3 hours
+**Focus:** Behavioral Analysis (3.5.2) + Voice Profile (3.5.3) + Follow-up Detection (3.5.4)
+
+**Completed:**
+
+#### Part 1: Behavioral Analysis (Phase 3.5.2)
+
+1. **Created BehavioralAnalyzer Service:**
+   - `sage/backend/sage/services/behavioral_analyzer.py` (~450 lines)
+   - Analyzes response patterns across 85K email corpus
+   - Identifies VIP contacts based on response rate thresholds
+   - Extracts priority keywords from quickly-responded emails
+   - Analyzes starred/important label patterns
+
+2. **Response Pattern Analysis:**
+   - Correlates received emails with sent replies in same thread
+   - Calculates response times per sender
+   - Identifies senders with >50% response rate as VIPs
+   - Found 397 VIP contacts from 1,124 unique senders
+
+3. **Priority Keyword Extraction:**
+   - Extracts words from emails that got quick responses (<4 hours)
+   - Filters extensive stop word list (email boilerplate, signatures, etc.)
+   - Identified 100 meaningful priority keywords
+
+4. **Created Behavioral Analysis API:**
+   - `POST /api/v1/emails/behavioral-analysis` - Run analysis
+   - `GET /api/v1/emails/behavioral-analysis?user_email=` - Get insights
+   - `GET /api/v1/emails/vip-contacts` - List VIP contacts
+
+#### Part 2: Voice Profile Extraction (Phase 3.5.3)
+
+5. **Created VoiceProfileExtractor Service:**
+   - `sage/backend/sage/services/voice_profile_extractor.py` (~750 lines)
+   - Analyzes sent emails to learn user's writing style
+   - Filters out automated emails (calendar invites, transcripts, etc.)
+   - Extracts signature patterns, greetings, sign-offs
+   - Calculates formality score and style metrics
+
+6. **Voice Profile Results:**
+   - Emails analyzed: 5,000 (sampled, filters applied)
+   - Greeting usage: 0.5% (rarely uses greetings)
+   - Sign-off preference: "Thank you"
+   - Avg email length: 95 words
+   - Formality score: 0.03 (very casual)
+   - Structure: direct (gets straight to the point)
+   - Uses contractions: Yes
+
+7. **Created Voice Profile API:**
+   - `POST /api/v1/emails/voice-profile` - Extract profile
+   - `GET /api/v1/emails/voice-profile?user_email=` - Get profile
+   - Profile includes prompt guidance for Draft Agent
+
+#### Part 3: Follow-up Pattern Detection (Phase 3.5.4)
+
+8. **Created FollowupPatternDetector Service:**
+   - `sage/backend/sage/services/followup_detector.py` (~600 lines)
+   - Hybrid heuristics + AI classification for "expects response"
+   - Business day timing calculation
+   - Filters out calendar invites, self-emails, stale threads (>60 days)
+
+9. **Classification System:**
+   - Heuristic patterns: question marks, request phrases, deadlines (+points)
+   - Closing patterns: "Thanks", "Got it", "Sounds good" (-points)
+   - Ambiguous cases (score 30-60) routed to AI classification
+   - All 6 test cases passing
+
+10. **Detection Results:**
+    - Threads analyzed: 1,393 (6 months)
+    - Threads waiting for response: 125
+    - Action breakdown: 110 call+followup, 12 send, 3 draft
+
+11. **Created Follow-up APIs:**
+    - `POST /api/v1/followups/detect` - Run detection
+    - `GET /api/v1/followups/detect/{id}` - Check progress
+    - `GET /api/v1/followups/daily-review` - Get items with phone numbers
+
+**Files Created:**
+- `sage/backend/sage/services/behavioral_analyzer.py` (~450 lines)
+- `sage/backend/sage/services/voice_profile_extractor.py` (~750 lines)
+- `sage/backend/sage/services/followup_detector.py` (~600 lines)
+
+**Files Modified:**
+- `sage/backend/sage/schemas/email.py` - Added behavioral + voice profile schemas
+- `sage/backend/sage/schemas/followup.py` - Added detection schemas
+- `sage/backend/sage/api/emails.py` - Added voice profile endpoints
+- `sage/backend/sage/api/followups.py` - Added detection endpoints
+
+**Key Design Decisions:**
+- VIP threshold: 3+ emails received AND 50%+ response rate
+- Voice profile filters out calendar/transcript noise automatically
+- Profile generates prompt guidance for Draft Agent integration
+- Follow-up timing: 1 day→draft, 3 days→send, 5+ days→call
+- Hybrid classification: heuristics first, AI for ambiguous
+- Max follow-up age: 60 business days
+
+**Next Session Should:**
+1. Begin Sage Orchestrator implementation (Phase 4)
+2. Implement intent recognition and agent routing
+3. Wire orchestrator to chat API
+
+---
+
+### Session 7: January 20, 2026
+**Duration:** ~1 hour
+**Focus:** SAR Documentation Updates for TodoList Agent and Clarifier Agent
+
+**Completed:**
+
+1. **Updated sage-specification.md (v2.3):**
+   - Added TodoList Agent and Clarifier Agent to agent overview table
+   - Added detailed sections (5.3, 5.4) for both new agents
+   - Updated architecture diagram to show 10 task agents
+   - Updated Briefing Agent to include TodoList and Clarifier integration
+   - Updated morning briefing example with TodoList section and ambiguous email alerts
+
+2. **Updated sage-agent-architecture.md (v1.2):**
+   - Updated architecture diagram to include TodoList and Clarifier agents
+   - Added detailed YAML specifications for both agents:
+     - TodoList Agent: detect_todos, list_todos, complete_todo, snooze_todo, extract_from_meeting
+     - Clarifier Agent: detect_ambiguity, generate_questions, draft_clarification, list_ambiguous
+   - Added data flow examples (6.3, 6.4) for both agents
+   - Updated intent recognition examples table
+   - Updated capability reference table in Appendix A
+
+3. **Updated sage-implementation-roadmap.md:**
+   - Added Phase 3.6: TodoList Agent Implementation
+   - Added Phase 3.7: Clarifier Agent Implementation
+   - Updated Quick Status table with new agents
+   - Updated Phase 5 to include new agents
+   - Updated current phase and next session focus
+
+**Key Design Decisions:**
+- TodoList categories: self_reminder, request_received, commitment_made, meeting_action
+- TodoList priority rules: urgent (24h deadline), high (VIP/1 week), normal, low
+- Clarifier triggers: missing_deadline, unclear_ownership, vague_request, multiple_interpretations, incomplete_info
+- Clarifier maintains human-in-the-loop for all draft emails
+- Both agents integrate with daily briefing
+
+**Files Modified:**
+- `sage-specification.md` (v2.3)
+- `sage-agent-architecture.md` (v1.2)
+- `sage-implementation-roadmap.md`
+
+**Next Session Should:**
+1. Begin TodoList Agent implementation (Phase 3.6)
+2. Create database migration for `todo_items` table
+3. Implement `detect_todos` capability
+
+---
+
+### Session 8: January 20, 2026
+**Duration:** ~1 hour
+**Focus:** Dashboard & Calendar Improvements
+
+**Completed:**
+
+1. **Made Dashboard Stat Cards Clickable:**
+   - Updated `StatCard` component to use Next.js `Link`
+   - Added hover effects (shadow, background color)
+   - Configured navigation URLs:
+     - "Overdue Follow-ups" → `/followups?overdue=true`
+     - "Overdue Todos" → `/todos?overdue=true`
+     - "Pending Todos" → `/todos`
+     - "Unread Emails" → `/emails`
+     - "Completed Today" → `/todos?status=completed`
+
+2. **Added URL Parameter Support to Filter Pages:**
+   - Updated `/followups/page.tsx` to read `overdue`, `status`, `priority` from URL
+   - Updated `/todos/page.tsx` to read `overdue`, `status`, `category`, `priority` from URL
+   - Used `useSearchParams` hook and `useEffect` for initialization
+
+3. **Fixed Calendar Widget in Dashboard:**
+   - Dashboard API was returning empty `todays_events` array (TODO placeholder)
+   - Added `get_todays_calendar_events()` helper function to dashboard API
+   - Function fetches from Google Calendar using user's OAuth tokens
+   - Calendar widget now displays today's events on dashboard
+
+4. **Fixed Calendar Page Timezone Bug:**
+   - Issue: Calendar showed "Today" as Jan 19th when it was Jan 20th
+   - Root cause: `toISOString()` converts dates to UTC, shifting back a day for western timezones
+   - Solution: Created `formatLocalDate()` helper to format dates in local timezone
+   - Fixed both day header generation and event date matching
+   - Fixed date display by parsing date strings with `T00:00:00` suffix
+
+**Files Modified:**
+- `sage/frontend/src/app/page.tsx` - Clickable stat cards, added Link import
+- `sage/frontend/src/app/followups/page.tsx` - URL parameter support
+- `sage/frontend/src/app/todos/page.tsx` - URL parameter support
+- `sage/frontend/src/app/calendar/page.tsx` - Timezone fix with `formatLocalDate()`
+- `sage/backend/sage/api/dashboard.py` - Calendar events integration
+
+**Key Decisions:**
+- Stat cards navigate to filtered list pages rather than opening modals
+- Used URL parameters (not route params) for filter state to allow easy sharing/bookmarking
+- Calendar events fetched in real-time from Google API (not cached)
+- Local timezone formatting ensures dates display correctly regardless of user location
+
+**Next Session Should:**
+1. Continue Clarifier Agent implementation (Phase 3.8)
+2. Or begin Sage Orchestrator implementation (Phase 4)
+
+---
+
+### Session 8b: January 20, 2026
+**Duration:** ~30 min
+**Focus:** Documentation Restructuring
+
+**Completed:**
+
+1. **Split Architecture Document into Focused Files:**
+   - Created `sage-architecture/` directory with 6 focused documents:
+     - `00-overview.md` - Executive summary, design principles, agent summary
+     - `01-data-layer.md` - Data Layer, Indexer Agent, schemas, DataLayerService
+     - `02-sub-agents.md` - Search Agent and all 10 task agent specifications
+     - `03-orchestrator.md` - Sage Orchestrator, intent recognition, routing
+     - `04-data-flow.md` - Agent communication protocol and data flow examples
+     - `05-implementation.md` - Implementation guide, migration path, appendices
+   - Original `sage-agent-architecture.md` now redirects to new location
+   - Each document is under 25K tokens for easy reading
+
+2. **Updated Document References:**
+   - Updated `sage-implementation-roadmap.md` reference links
+   - Added cross-references between split documents
+
+**Rationale:**
+- Original architecture doc exceeded 25K token limit, requiring chunked reads
+- Split structure enables focused updates without loading entire document
+- Each section can be maintained independently
+
+**Files Created:**
+- `sage-architecture/00-overview.md`
+- `sage-architecture/01-data-layer.md`
+- `sage-architecture/02-sub-agents.md`
+- `sage-architecture/03-orchestrator.md`
+- `sage-architecture/04-data-flow.md`
+- `sage-architecture/05-implementation.md`
+
+**Files Modified:**
+- `sage-agent-architecture.md` - Now a redirect file
+- `sage-implementation-roadmap.md` - Updated reference links
+
+---
+
 ## Detailed Task Backlog
 
-### Priority 1: Agent Infrastructure
+### Priority 1: Historical Data Import (Phase 3.5)
+```
+Tiered Indexing Strategy:
+┌─────────────────────────────────────────────────────────────────┐
+│ Tier 1: FULL CORPUS (50K emails)                                │
+│ - All inbox + sent emails                                       │
+│ - Store: metadata + vector embeddings                           │
+│ - Skip: AI analysis (priority, category, summary)               │
+│ - Cost: ~$5-10 (embeddings only)                                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────┐
+│ Tier 2: ACTIVE WINDOW (recent 90 days, ~2K emails)              │
+│ - Full AI analysis                                              │
+│ - Priority, category, summary, action items                     │
+│ - This is the "working set" for daily use                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────┐
+│ Tier 3: VOICE CORPUS (all sent emails, ~5K)                     │
+│ - Style extraction for voice training                           │
+│ - Greeting/sign-off patterns                                    │
+│ - Vocabulary and formality levels                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Priority 2: Agent Infrastructure
 ```
 sage/backend/sage/agents/
 ├── __init__.py
@@ -362,8 +954,8 @@ sage/backend/sage/agents/
 ├── orchestrator.py         # SageOrchestrator (Phase 4)
 ├── foundational/
 │   ├── __init__.py
-│   ├── indexer.py         # IndexerAgent
-│   └── search.py          # SearchAgent
+│   ├── indexer.py         # IndexerAgent (needs implementation)
+│   └── search.py          # SearchAgent ✅ COMPLETE
 └── task/
     ├── __init__.py
     ├── email.py           # EmailAgent
@@ -376,19 +968,21 @@ sage/backend/sage/agents/
     └── research.py        # ResearchAgent
 ```
 
-### Priority 2: Database Schema Updates
+### Priority 3: Database Schema Updates
 - [ ] Add `memories` table for conversation memory
 - [ ] Add `facts` table for extracted facts
 - [ ] Add `superseded_by` column for fact tracking
+- [ ] Add `voice_profile` table for writing style
+- [ ] Add `behavioral_insights` table for priority patterns
 - [ ] Create Alembic migration
 
-### Priority 3: Refactoring Map
+### Priority 4: Refactoring Map
 | Existing File | Extract To | Notes |
 |---------------|------------|-------|
 | `core/claude_agent.py` | `agents/task/email.py`, `agents/task/draft.py` | Split by capability |
 | `core/followup_tracker.py` | `agents/task/followup.py` | Direct migration |
 | `core/briefing_generator.py` | `agents/task/briefing.py` | Direct migration |
-| `services/vector_search.py` | `agents/foundational/search.py` | Wrap in SearchAgent |
+| `services/vector_search.py` | Used by DataLayerService | Already integrated |
 | `api/emails.py` (indexing) | `agents/foundational/indexer.py` | Extract indexing logic |
 
 ---
@@ -405,10 +999,11 @@ sage/backend/sage/agents/
 └─────────────────────────────────┬───────────────────────────────────┘
                                   │
 ┌─────────────────────────────────▼───────────────────────────────────┐
-│                    LAYER 2: SUB-AGENTS                               │
-│  Email | Follow-Up | Meeting | Calendar | Briefing | Draft | ...    │
+│                    LAYER 2: SUB-AGENTS (10 total)                    │
+│  Email | Follow-Up | TodoList | Clarifier | Meeting | Calendar      │
+│  Briefing | Draft | Property | Research                             │
 │                    ┌──────────────────────┐                         │
-│                    │    SEARCH AGENT      │                         │
+│                    │  SEARCH AGENT ✅      │                         │
 │                    └──────────────────────┘                         │
 └─────────────────────────────────┬───────────────────────────────────┘
                                   │
@@ -453,7 +1048,7 @@ sage/backend/sage/agents/
 | Document | Purpose |
 |----------|---------|
 | [sage-specification.md](sage-specification.md) | What Sage does, who it serves, business context |
-| [sage-agent-architecture.md](sage-agent-architecture.md) | How Sage is built, agent specs, data schemas |
+| [sage-architecture/](sage-architecture/00-overview.md) | How Sage is built, agent specs, data schemas (split into focused docs) |
 | [Backend README](sage/README.md) | Quick start, development commands |
 | [API Docs](http://localhost:8000/docs) | Live API documentation (when running) |
 
@@ -463,7 +1058,6 @@ sage/backend/sage/agents/
 
 *Items to consider but not currently prioritized:*
 
-- Voice profile training from sent folder analysis
 - Entrata report parsing for property metrics
 - Stock price integration (Alpha Vantage API)
 - Family calendar sports schedule parsing

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { followupsApi } from '@/lib/api'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
@@ -17,9 +18,28 @@ import {
 import Link from 'next/link'
 
 export default function FollowupsPage() {
+  const searchParams = useSearchParams()
+
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [priorityFilter, setPriorityFilter] = useState<string>('')
   const [showOverdueOnly, setShowOverdueOnly] = useState(false)
+
+  // Initialize filters from URL params
+  useEffect(() => {
+    const overdueParam = searchParams.get('overdue')
+    const statusParam = searchParams.get('status')
+    const priorityParam = searchParams.get('priority')
+
+    if (overdueParam === 'true') {
+      setShowOverdueOnly(true)
+    }
+    if (statusParam) {
+      setStatusFilter(statusParam)
+    }
+    if (priorityParam) {
+      setPriorityFilter(priorityParam)
+    }
+  }, [searchParams])
 
   const queryClient = useQueryClient()
 

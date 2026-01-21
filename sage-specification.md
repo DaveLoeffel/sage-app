@@ -1,9 +1,9 @@
 # SAGE: AI Executive Assistant
 ## Complete System Specification for Dave Loeffel
 
-**Document Version:** 2.1
+**Document Version:** 2.5
 **Created:** January 2025
-**Last Updated:** January 2026
+**Last Updated:** January 20, 2026
 **System Name:** Sage
 **Owner:** Dave Loeffel, CFA | Highlands Residential, LLC
 **Implementation Status:** Architecture Finalized, Implementation In Progress
@@ -24,7 +24,7 @@ Sage is built on a three-layer multi-agent architecture:
 | Layer | Purpose | Key Components |
 |-------|---------|----------------|
 | **Data Layer** | Store and index all information | PostgreSQL, Qdrant, Redis + Indexer Agent |
-| **Sub-Agent Layer** | Specialized task execution | Email, Follow-Up, Meeting, Calendar, Briefing, Draft, Property, Research Agents + Search Agent |
+| **Sub-Agent Layer** | Specialized task execution | Email, Follow-Up, TodoList, Clarifier, Meeting, Calendar, Briefing, Draft, Property, Research Agents (10 total) + Search Agent |
 | **Orchestrator Layer** | User interaction and coordination | Sage Orchestrator |
 
 See [sage-agent-architecture.md](sage-agent-architecture.md) for complete architecture details.
@@ -193,9 +193,13 @@ www.HighlandsResidential.com
 ┌─────────────────────────────────▼───────────────────────────────────┐
 │                    LAYER 2: SUB-AGENTS                               │
 │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐  │
-│  │ Email  │ │Follow- │ │Meeting │ │Calendar│ │Briefing│ │ Draft  │  │
-│  │ Agent  │ │Up Agent│ │ Agent  │ │ Agent  │ │ Agent  │ │ Agent  │  │
+│  │ Email  │ │Follow- │ │TodoList│ │Clarifi-│ │Meeting │ │Calendar│  │
+│  │ Agent  │ │Up Agent│ │ Agent  │ │er Agent│ │ Agent  │ │ Agent  │  │
 │  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘ └────────┘  │
+│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐                        │
+│  │Briefing│ │ Draft  │ │Property│ │Research│  (10 task agents)      │
+│  │ Agent  │ │ Agent  │ │ Agent  │ │ Agent  │                        │
+│  └────────┘ └────────┘ └────────┘ └────────┘                        │
 │                    ┌──────────────────────┐                         │
 │                    │    SEARCH AGENT      │                         │
 │                    │ (context retrieval)  │                         │
@@ -461,8 +465,10 @@ The Indexer Agent extracts and categorizes information from every conversation:
 | **Search Agent** | Retrieves context for all other agents | PLANNED |
 | **Email Agent** | Analyzes emails, drafts replies | PARTIAL |
 | **Follow-Up Agent** | Tracks commitments, generates reminders | COMPLETE |
+| **TodoList Agent** | Scans emails and meetings for action items, tracks todo items | COMPLETE |
+| **Clarifier Agent** | Drafts clarifying emails for ambiguous requests | PLANNED |
 | **Meeting Agent** | Prepares meeting context, extracts actions | PARTIAL |
-| **Calendar Agent** | Manages schedule queries, detects conflicts | PARTIAL |
+| **Calendar Agent** | Manages schedule queries, detects conflicts | PARTIAL (API complete, dashboard integrated) |
 | **Briefing Agent** | Generates morning and weekly briefings | PARTIAL |
 | **Draft Agent** | Writes content in Dave's voice | PARTIAL |
 | **Property Agent** | Property metrics and analysis | PLANNED |
@@ -480,13 +486,91 @@ The Indexer Agent extracts and categorizes information from every conversation:
 | 7 | Escalation drafted with supervisor CC |
 | 7+ | Dashboard alert for Dave to prioritize |
 
-### 5.3 Briefing Agent — **PARTIAL**
+### 5.3 TodoList Agent — **COMPLETE**
+*Primary success metric: No action item is forgotten*
+
+Scans emails and meetings for items that Dave needs to do. Captures both self-reminders ("Reminder: need to call Steve"), requests from others ("Can you send me the Q4 report?"), and meeting action items from Fireflies transcripts and Plaud recordings.
+
+**Detection Sources:**
+- Emails where Dave reminds himself (sent to self, or notes in drafts)
+- Requests from others in received emails
+- Commitments Dave makes in sent emails
+- Meeting transcripts (Fireflies) - action items Dave committed to
+- Plaud recordings - action items from recorded meetings/calls
+
+**Todo Categories:**
+| Category | Description | Example |
+|----------|-------------|---------|
+| `self_reminder` | Dave reminding himself | "Reminder: call insurance agent Tuesday" |
+| `request_received` | Someone asks Dave to do something | "Can you review the attached proposal?" |
+| `commitment_made` | Dave promises to do something | "I'll send you the numbers by Friday" |
+| `meeting_action` | Action item from a meeting | "Dave to follow up with vendor on pricing" |
+
+**Priority Assignment:**
+| Priority | Criteria |
+|----------|----------|
+| `urgent` | Explicit deadline within 24 hours, or words like "ASAP", "urgent" |
+| `high` | VIP sender, deadline within 1 week, or financial/legal implications |
+| `normal` | Standard requests with reasonable timeframe |
+| `low` | Nice-to-have, no explicit deadline |
+
+**Integration with Daily Briefing:**
+- TodoList items appear in a dedicated section of the morning briefing
+- Grouped by: Due Today, Due This Week, Overdue
+- Shows source (email subject/sender) for context
+
+### 5.4 Clarifier Agent — **PLANNED**
+*Primary success metric: No email leaves Dave confused about next steps*
+
+Identifies emails where the next steps are ambiguous and drafts a clarifying email for Dave's review.
+
+**Ambiguity Triggers:**
+| Trigger | Example |
+|---------|---------|
+| Missing deadline | "Let's connect soon" (when?) |
+| Unclear ownership | "Someone should handle this" (who?) |
+| Vague request | "Can you help with the project?" (how?) |
+| Multiple possible interpretations | "Let me know your thoughts" (on what specifically?) |
+| Incomplete information | "The meeting is next week" (what day/time?) |
+
+**Clarification Process:**
+1. Clarifier Agent detects ambiguous email
+2. Generates clarifying questions (2-4 specific questions)
+3. Drafts a polite email requesting clarification
+4. Presents draft to Dave for review/approval
+5. If approved, email is sent (human-in-the-loop)
+
+**Draft Email Guidelines:**
+- Professional, warm tone matching Dave's voice
+- Specific questions (not open-ended)
+- Acknowledges what IS clear before asking what isn't
+- Keeps it brief (3-5 sentences max)
+
+**Example Output:**
+```
+Subject: Re: Project timeline discussion
+
+Hi [Name],
+
+Thanks for sending this over. I want to make sure I understand the next steps correctly:
+
+1. When you say "soon," do you have a specific date in mind for our meeting?
+2. Should I prepare anything in advance, or is this more of a general discussion?
+
+Let me know and I'll get it on the calendar.
+
+[signature]
+```
+
+### 5.5 Briefing Agent — **PARTIAL**
 *Generation works, email delivery pending*
 
 **Morning Briefing** (6:30 AM ET):
 - Urgent attention items
 - Today's calendar with context
 - Overdue and due-today follow-ups
+- **Todo items** (due today, due this week, overdue)
+- Ambiguous emails flagged by Clarifier Agent
 - Property metrics snapshot
 - AI-generated priorities
 
@@ -531,10 +615,11 @@ Generates meeting prep including:
 
 **Morning Briefing Example:**
 ```
-🚨 REQUIRES ATTENTION (3)
+🚨 REQUIRES ATTENTION (4)
 1. Email from Steve Hinkle - ROW dedication update
 2. Follow-up overdue: Yanet/Renderings - Day 3
 3. Sophia track meet today - conflicts with 3:30 call
+4. ❓ Ambiguous email from Tim Schrager - needs clarification (draft ready)
 
 📅 TODAY'S CALENDAR
 9:00 AM  Weekly sync - Laura Hodgson
@@ -543,6 +628,16 @@ Generates meeting prep including:
 
 ✅ FOLLOW-UP STATUS
 Pending: 8 | Overdue: 2 | Resolved yesterday: 3
+
+📋 TODO LIST
+Due Today:
+  • Send Q4 investor update draft to Laura [request from Laura Hodgson, Jan 18]
+  • Review insurance renewal options [self-reminder, Jan 15]
+Due This Week:
+  • Prepare board meeting materials [request from Tim Schrager, Jan 14]
+Overdue (2):
+  • Call Steve Hinkle re: ROW dedication [commitment made, Jan 10]
+  • Respond to Brad Brezina re: policy questions [request, Jan 12]
 
 💡 TODAY'S PRODUCTIVITY SUGGESTION
 Consider creating an SOP for "Entrata Asset Update Requests" - this is the third time renderings have needed follow-up. A checklist could prevent delays.
@@ -800,12 +895,14 @@ The Sage system has progressed significantly from the original specification. Co
 - [ ] TODO: Automatic delivery 30 min before meeting
 - [ ] TODO: Post-meeting summary generation
 
-#### Dashboard & UI (60%)
+#### Dashboard & UI (75%)
 - [x] Next.js 15 / React 19 structure
-- [x] Stats cards (overdue, pending, unread, completed)
+- [x] Stats cards (overdue, pending, unread, completed) — **now clickable with navigation**
 - [x] Follow-up widget
 - [x] Email widget
-- [x] Calendar widget placeholder
+- [x] Calendar widget — **now displays today's events from Google Calendar**
+- [x] URL parameter support for filtered views (followups, todos pages)
+- [x] Timezone-aware date handling in calendar
 - [ ] TODO: Polish and responsive design
 - [ ] TODO: Quick actions implementation
 - [ ] TODO: Charts and visualizations
@@ -1192,6 +1289,9 @@ MSTR, TSLA, NVDA, PLTR, NUKZ, ALB, MP, POWL, TREE, ULTA, BTC
 | 2.0 | January 2026 | Dave Loeffel + Claude | Implementation progress documented; Technology stack updated (FastAPI, Docker); Directory structure populated; Setup checklist updated; Testing criteria updated; Module specifications annotated with status |
 | 2.1 | January 2026 | Dave Loeffel + Claude | **Architecture refactor:** Introduced three-layer agent architecture; Created [sage-agent-architecture.md](sage-agent-architecture.md); Updated Section 2 (System Architecture), Section 4 (Data Layer), Section 5 (Sub-Agents) to reference architecture doc; Removed duplicated content; Added conversation memory and Indexer/Search Agent concepts |
 | 2.2 | January 18, 2026 | Dave Loeffel + Claude | **DataLayerService complete:** Implemented concrete DataLayerService with entity adapters (email, contact, followup, meeting, generic); Created sage_entities Qdrant collection; Added indexed_entities and entity_relationships tables; 21 unit tests passing; Initial commit to GitHub (github.com/DaveLoeffel/sage-app) |
+| 2.3 | January 20, 2026 | Dave Loeffel + Claude | **Added TodoList Agent and Clarifier Agent:** New agents for action item tracking and email clarification; Updated architecture diagrams; Added TodoList section to daily briefing; Expanded sub-agent count to 10 task agents |
+| 2.4 | January 20, 2026 | Dave Loeffel + Claude | **Meeting Review Service complete:** Implemented MeetingReviewService for AI extraction of action items from Fireflies transcripts and Plaud recordings; Created todo_items table (migration 005); Updated followups table to support meeting-based entries (migration 006 - nullable gmail_id/thread_id, added source_type/source_id); Initial 30-day review populated 46 todos and 82 followups; Added API endpoints for meeting review |
+| 2.5 | January 20, 2026 | Dave Loeffel + Claude | **Dashboard & Calendar improvements:** Dashboard stat cards now clickable (navigate to filtered pages); Calendar widget now displays today's events (was returning empty); Fixed calendar page timezone bug (was showing previous day as "Today" for users west of UTC); Added URL parameter support to followups and todos pages for deep linking |
 
 ---
 
@@ -1219,6 +1319,10 @@ MSTR, TSLA, NVDA, PLTR, NUKZ, ALB, MP, POWL, TREE, ULTA, BTC
 | `/api/v1/followups/{id}` | GET, PATCH, DELETE | Manage single follow-up |
 | `/api/v1/followups/{id}/complete` | POST | Mark follow-up complete |
 | `/api/v1/followups/{id}/cancel` | POST | Cancel follow-up |
+| `/api/v1/todos` | GET, POST | List/create todos |
+| `/api/v1/todos/{id}` | GET, PATCH | Manage single todo |
+| `/api/v1/todos/{id}/complete` | POST | Mark todo complete |
+| `/api/v1/todos/{id}/snooze` | POST | Snooze todo to later date |
 | `/api/v1/calendar` | GET | Calendar events |
 | `/api/v1/briefings/morning` | POST | Generate morning briefing |
 | `/api/v1/briefings/weekly` | POST | Generate weekly review |
@@ -1226,6 +1330,9 @@ MSTR, TSLA, NVDA, PLTR, NUKZ, ALB, MP, POWL, TREE, ULTA, BTC
 | `/api/v1/dashboard/summary` | GET | Dashboard statistics |
 | `/api/v1/meetings` | GET | List upcoming meetings |
 | `/api/v1/meetings/{id}/prep` | GET | Get meeting preparation |
+| `/api/v1/meetings/review/all` | POST | Review all meetings for action items |
+| `/api/v1/meetings/review/{id}` | POST | Review single Fireflies meeting |
+| `/api/v1/meetings/review/plaud/{id}` | POST | Review single Plaud recording |
 
 Full API documentation available at: `http://localhost:8000/docs`
 
