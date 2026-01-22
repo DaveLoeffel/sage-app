@@ -140,6 +140,11 @@ async def _execute_with_fallback(self, agent_name: str, call: AgentCall) -> Agen
 
 ### Example 2: User Asks "What's overdue?"
 
+> **⚠️ IMPLEMENTATION NOTE (Phase 3.9):** Until the full Orchestrator is implemented,
+> the chat endpoint should call SearchAgent directly to retrieve context before
+> passing the user message to Claude. This prevents hallucination by ensuring
+> Claude has real data to work with. See Phase 3.9 in the roadmap.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ User: "What follow-ups are overdue?"                                │

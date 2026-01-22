@@ -176,12 +176,25 @@ class FollowupAdapter(BaseEntityAdapter[Followup]):
         if "user_id" in filters:
             query = query.where(Followup.user_id == filters["user_id"])
         if "status" in filters:
-            if isinstance(filters["status"], str):
+            status_value = filters["status"]
+            if isinstance(status_value, list):
+                # Handle list of statuses (e.g., ["pending", "reminded", "escalated"])
+                enum_values = []
+                for s in status_value:
+                    try:
+                        enum_values.append(FollowupStatus(s))
+                    except ValueError:
+                        pass
+                if enum_values:
+                    query = query.where(Followup.status.in_(enum_values))
+            elif isinstance(status_value, str):
                 try:
-                    filters["status"] = FollowupStatus(filters["status"])
+                    status_enum = FollowupStatus(status_value)
+                    query = query.where(Followup.status == status_enum)
                 except ValueError:
                     pass
-            query = query.where(Followup.status == filters["status"])
+            else:
+                query = query.where(Followup.status == status_value)
         if "contact_email" in filters:
             query = query.where(Followup.contact_email == filters["contact_email"])
         if "due_before" in filters:

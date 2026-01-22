@@ -1,9 +1,9 @@
 # Sage Implementation Roadmap
 ## Session-by-Session Progress Tracker
 
-**Last Updated:** January 20, 2026
-**Current Phase:** Foundational Agents (Phase 3.8)
-**Next Session Focus:** Clarifier Agent Implementation OR Sage Orchestrator (Phase 4)
+**Last Updated:** January 22, 2026
+**Current Phase:** Context-Aware Chat (Phase 3.9) 🚨 CRITICAL
+**Next Session Focus:** Fix chat hallucination by integrating SearchAgent into chat flow
 
 ---
 
@@ -21,6 +21,7 @@
 | Behavioral Analysis | **COMPLETE** | 100% |
 | Voice Profile Training | **COMPLETE** | 100% |
 | Follow-up Detection | **COMPLETE** | 100% |
+| **Context-Aware Chat (RAG)** | ✅ FUNCTIONAL | 75% |
 | Sage Orchestrator | STUBBED | 10% |
 | Task Agents (10) | STUBBED | 15% |
 | TodoList Agent | **COMPLETE** | 100% |
@@ -222,6 +223,48 @@
 - [x] Update chat API to call `index_memory` after exchanges (background task)
 - [x] Create unit tests (`tests/agents/test_indexer_agent.py`) - 35 tests passing
 - [x] Integration tests (`tests/integration/test_indexer_integration.py`) - 11 tests passing
+
+### Phase 3.9: Context-Aware Chat (RAG Integration) 🚨 CRITICAL
+**Goal:** Fix hallucination issue by integrating SearchAgent into chat flow. This is a prerequisite for useful chat functionality.
+
+**Problem:** Chat endpoint sends user messages to Claude without any context. Claude hallucinates emails, contacts, etc. because it has no real data.
+
+**Solution:** Wire SearchAgent into chat endpoint to retrieve relevant context before calling Claude.
+
+#### 3.9.1 Chat Context Retrieval ✅ COMPLETE
+- [x] Create `get_chat_context()` helper in chat.py that calls SearchAgent
+- [x] Analyze user message to determine what types of context to retrieve
+- [x] Call `SearchAgent.search_for_task()` with user message as task description
+- [x] Format SearchContext into prompt-friendly context string
+- [x] Pass context to `ClaudeAgent.chat()`
+
+#### 3.9.2 Context Formatting ✅ COMPLETE
+- [x] Create context formatter that converts SearchContext to readable prompt text
+- [x] Include relevant emails with subject, sender, date, snippet
+- [x] Include relevant contacts with name, email, relationship
+- [x] Include relevant follow-ups with status, due date
+- [x] Include relevant memories for conversation continuity
+- [x] Add clear instructions for Claude to use only provided data
+
+#### 3.9.3 Intent-Based Context Optimization
+- [x] Detect general queries → use balanced context retrieval (emails + followups)
+- [ ] Detect email-related queries → prioritize email context
+- [ ] Detect follow-up queries → prioritize follow-up context
+- [ ] Detect meeting queries → prioritize meeting/calendar context
+- [ ] Add entity hints extraction from user message (names, subjects, etc.)
+
+#### 3.9.4 Testing & Validation ✅ COMPLETE
+- [x] Test: "Show me emails from [real contact]" returns real emails
+- [x] Test: "What follow-ups are overdue?" returns actual follow-ups
+- [x] Test: System says "I don't have that information" for non-existent data
+- [ ] Test: "What did we discuss about [topic]?" retrieves memories
+- [ ] Test: Multi-turn conversation maintains context
+
+**Expected Outcome:** Chat responses are grounded in real data from the database. Users can ask about their emails, contacts, follow-ups and get accurate answers.
+
+**Note:** This is a simplified version of the full Orchestrator (Phase 4). Once working, Phase 4 will add intent recognition, multi-agent coordination, and approval workflows.
+
+---
 
 ### Phase 3.8: Clarifier Agent Implementation
 **Goal:** Implement agent to detect ambiguous emails and draft clarifying responses.
@@ -915,6 +958,57 @@
 **Files Modified:**
 - `sage-agent-architecture.md` - Now a redirect file
 - `sage-implementation-roadmap.md` - Updated reference links
+
+---
+
+### Session 9: January 22, 2026
+**Duration:** ~1.5 hours
+**Focus:** Phase 3.9 - Context-Aware Chat (RAG Integration) 🚨 CRITICAL FIX
+
+**Problem Identified:**
+- Chat endpoint was sending user messages directly to Claude without any database context
+- Result: Claude hallucinated fake emails, contacts, and follow-ups
+- Root cause: SearchAgent (fully implemented) was never called from chat flow
+
+**Completed:**
+
+1. **Implemented Context-Aware Chat:**
+   - Created `get_chat_context()` function in `chat.py` that calls SearchAgent
+   - Created `format_search_context()` to convert SearchContext to Claude-friendly format
+   - Added instructions telling Claude to only use provided data, never hallucinate
+   - Wired context retrieval into chat endpoint before calling ClaudeAgent
+
+2. **Fixed SearchAgent for Chat:**
+   - Added "chat" case to `_enrich_for_agent()` method
+   - Chat now gets comprehensive context: unread emails + active followups
+   - Added error handling around each query type
+
+3. **Fixed FollowupAdapter Query:**
+   - Bug: Status filter didn't handle list values like `["pending", "reminded", "escalated"]`
+   - Fix: Added list handling with `Followup.status.in_(enum_values)`
+
+4. **Testing Results:**
+   - ✅ "What followups are overdue?" → Returns real contacts (Antonio Ralda, Sam Sweitzer, Keri Colgrove)
+   - ✅ "Show me unread emails" → Returns real emails with actual senders and subjects
+   - ✅ "What did John Smith email me?" → Correctly says "I don't see any emails from John Smith"
+   - ✅ No more hallucination of fake data
+
+**Files Modified:**
+- `sage/backend/sage/api/chat.py` - Added context retrieval (get_chat_context, format_search_context)
+- `sage/backend/sage/agents/foundational/search.py` - Added "chat" enrichment case
+- `sage/backend/sage/services/data_layer/adapters/followup.py` - Fixed list filter handling
+- `sage-implementation-roadmap.md` - Added Phase 3.9, updated status
+- `sage-architecture/04-data-flow.md` - Added implementation note
+
+**Key Design Decisions:**
+- Context includes up to 10 emails, 10 followups, 5 meetings, 5 memories (to limit token usage)
+- Added explicit instructions for Claude: "Use ONLY this data... Never hallucinate"
+- Error handling returns minimal context with warning rather than failing
+
+**Next Session Should:**
+1. Implement intent-based context optimization (prioritize based on query type)
+2. Add entity hints extraction (names, subjects from user message)
+3. Continue with Sage Orchestrator (Phase 4) for full multi-agent coordination
 
 ---
 
