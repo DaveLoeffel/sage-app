@@ -45,7 +45,7 @@ sage/backend/sage/
 │   └── ...existing services...
 │
 └── api/
-    ├── chat.py                 # Now calls Orchestrator
+    ├── chat.py                 # Context-aware chat (Phase 3.9) - calls SearchAgent for RAG
     └── ...existing endpoints...
 ```
 

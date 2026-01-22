@@ -1,9 +1,9 @@
 # Sage Agent Architecture: Overview
 
-**Version:** 1.4
+**Version:** 1.5
 **Created:** January 2026
-**Last Updated:** January 20, 2026
-**Status:** Implementation In Progress (Dashboard & Calendar Integration Complete)
+**Last Updated:** January 22, 2026
+**Status:** Context-Aware Chat Functional (Phase 3.9 Complete)
 
 ---
 
