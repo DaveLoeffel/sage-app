@@ -51,6 +51,16 @@ class EmailSummary(BaseModel):
     last_sync: datetime | None = None
 
 
+class TodoSummary(BaseModel):
+    """Summary of todo items."""
+
+    total_pending: int
+    overdue: int
+    due_today: int
+    due_this_week: int
+    completed_today: int
+
+
 class DashboardSummary(BaseModel):
     """Complete dashboard summary."""
 
@@ -62,6 +72,9 @@ class DashboardSummary(BaseModel):
     # Emails
     email_summary: EmailSummary
     priority_emails: list[EmailResponse]
+
+    # Todos
+    todo_summary: TodoSummary | None = None
 
     # Calendar
     todays_events: list[CalendarEvent]

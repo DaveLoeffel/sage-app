@@ -235,40 +235,40 @@ class SearchAgent(BaseAgent):
         requesting_agent: str,
         max_results: int
     ) -> None:
-        """Add agent-specific context enrichment."""
+        """Add agent-specific context enrichment.
+
+        Supports intent-based enrichment for chat queries:
+        - chat: General chat, balanced context
+        - chat_email: Email-focused queries, prioritize email context
+        - chat_followup: Follow-up queries, prioritize followup context
+        - chat_meeting: Meeting queries, prioritize meeting/calendar context
+        - chat_contact: Contact queries, prioritize contact context
+        - chat_todo: Todo queries, prioritize todo context
+        """
 
         if requesting_agent == "chat":
-            # Chat gets comprehensive context - emails, followups, contacts
-            # This is the main interface for user interaction
+            # General chat gets balanced context - emails, followups, contacts
+            await self._enrich_chat_general(context, max_results)
 
-            # Get recent/unread emails
-            try:
-                emails = await self.data_layer.structured_query(
-                    filters={"is_unread": True},
-                    entity_type="email",
-                    limit=max_results
-                )
-                for entity in emails:
-                    if not self._entity_in_list(entity.id, context.relevant_emails):
-                        context.relevant_emails.append(self._entity_to_dict(entity))
-            except Exception as e:
-                logger.warning(f"Error fetching emails for chat: {e}")
+        elif requesting_agent == "chat_email":
+            # Email-focused: prioritize email context with more results
+            await self._enrich_chat_email(context, max_results)
 
-            # Get active/overdue follow-ups
-            try:
-                followups = await self.data_layer.structured_query(
-                    filters={"status": ["pending", "reminded", "escalated"]},
-                    entity_type="followup",
-                    limit=max_results
-                )
-                for entity in followups:
-                    if not self._entity_in_list(entity.id, context.relevant_followups):
-                        context.relevant_followups.append(self._entity_to_dict(entity))
-            except Exception as e:
-                logger.warning(f"Error fetching followups for chat: {e}")
+        elif requesting_agent == "chat_followup":
+            # Follow-up focused: prioritize followup context
+            await self._enrich_chat_followup(context, max_results)
 
-            # Get recent contacts (contacts are populated via semantic search results)
-            # No additional contact fetch needed here as they come from semantic search
+        elif requesting_agent == "chat_meeting":
+            # Meeting focused: prioritize meeting/calendar context
+            await self._enrich_chat_meeting(context, max_results)
+
+        elif requesting_agent == "chat_contact":
+            # Contact focused: prioritize contact context
+            await self._enrich_chat_contact(context, max_results)
+
+        elif requesting_agent == "chat_todo":
+            # Todo focused: prioritize todo context
+            await self._enrich_chat_todo(context, max_results)
 
         elif requesting_agent == "followup":
             # Get active follow-ups
@@ -324,6 +324,252 @@ class SearchAgent(BaseAgent):
             for entity in meetings:
                 if not self._entity_in_list(entity.id, context.relevant_meetings):
                     context.relevant_meetings.append(self._entity_to_dict(entity))
+
+    async def _enrich_chat_general(
+        self,
+        context: SearchContext,
+        max_results: int
+    ) -> None:
+        """Enrich context for general chat queries - balanced approach."""
+        # Get recent/unread emails
+        try:
+            emails = await self.data_layer.structured_query(
+                filters={"is_unread": True},
+                entity_type="email",
+                limit=max_results
+            )
+            for entity in emails:
+                if not self._entity_in_list(entity.id, context.relevant_emails):
+                    context.relevant_emails.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching emails for chat: {e}")
+
+        # Get active/overdue follow-ups
+        try:
+            followups = await self.data_layer.structured_query(
+                filters={"status": ["pending", "reminded", "escalated"]},
+                entity_type="followup",
+                limit=max_results
+            )
+            for entity in followups:
+                if not self._entity_in_list(entity.id, context.relevant_followups):
+                    context.relevant_followups.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching followups for chat: {e}")
+
+    async def _enrich_chat_email(
+        self,
+        context: SearchContext,
+        max_results: int
+    ) -> None:
+        """Enrich context for email-focused queries - prioritize email data."""
+        # Get more emails with higher limit
+        email_limit = max_results * 2  # Double the limit for email-focused queries
+
+        try:
+            # Get unread emails
+            unread_emails = await self.data_layer.structured_query(
+                filters={"is_unread": True},
+                entity_type="email",
+                limit=email_limit
+            )
+            for entity in unread_emails:
+                if not self._entity_in_list(entity.id, context.relevant_emails):
+                    context.relevant_emails.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching unread emails: {e}")
+
+        try:
+            # Also get recent emails (even if read)
+            recent_emails = await self.data_layer.structured_query(
+                filters={},
+                entity_type="email",
+                limit=email_limit
+            )
+            for entity in recent_emails:
+                if not self._entity_in_list(entity.id, context.relevant_emails):
+                    context.relevant_emails.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching recent emails: {e}")
+
+        # Light followup context
+        try:
+            followups = await self.data_layer.structured_query(
+                filters={"status": ["pending", "reminded", "escalated"]},
+                entity_type="followup",
+                limit=5  # Fewer followups for email queries
+            )
+            for entity in followups:
+                if not self._entity_in_list(entity.id, context.relevant_followups):
+                    context.relevant_followups.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching followups: {e}")
+
+    async def _enrich_chat_followup(
+        self,
+        context: SearchContext,
+        max_results: int
+    ) -> None:
+        """Enrich context for follow-up focused queries."""
+        followup_limit = max_results * 2  # More followups for followup queries
+
+        try:
+            # Get all active followups with more results
+            followups = await self.data_layer.structured_query(
+                filters={"status": ["pending", "reminded", "escalated"]},
+                entity_type="followup",
+                limit=followup_limit
+            )
+            for entity in followups:
+                if not self._entity_in_list(entity.id, context.relevant_followups):
+                    context.relevant_followups.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching followups: {e}")
+
+        # Light email context (related to followups)
+        try:
+            emails = await self.data_layer.structured_query(
+                filters={"is_unread": True},
+                entity_type="email",
+                limit=5
+            )
+            for entity in emails:
+                if not self._entity_in_list(entity.id, context.relevant_emails):
+                    context.relevant_emails.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching emails: {e}")
+
+    async def _enrich_chat_meeting(
+        self,
+        context: SearchContext,
+        max_results: int
+    ) -> None:
+        """Enrich context for meeting/calendar focused queries."""
+        meeting_limit = max_results * 2
+
+        try:
+            # Get recent meetings
+            meetings = await self.data_layer.structured_query(
+                filters={},
+                entity_type="meeting",
+                limit=meeting_limit
+            )
+            for entity in meetings:
+                if not self._entity_in_list(entity.id, context.relevant_meetings):
+                    context.relevant_meetings.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching meetings: {e}")
+
+        # Light followup context (meeting-related followups)
+        try:
+            followups = await self.data_layer.structured_query(
+                filters={"status": ["pending", "reminded", "escalated"]},
+                entity_type="followup",
+                limit=5
+            )
+            for entity in followups:
+                if not self._entity_in_list(entity.id, context.relevant_followups):
+                    context.relevant_followups.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching followups: {e}")
+
+    async def _enrich_chat_contact(
+        self,
+        context: SearchContext,
+        max_results: int
+    ) -> None:
+        """Enrich context for contact/people focused queries."""
+        contact_limit = max_results * 2
+
+        try:
+            # Get contacts (will primarily come from semantic search,
+            # but add any VIP contacts as well)
+            contacts = await self.data_layer.structured_query(
+                filters={"is_vip": True},
+                entity_type="contact",
+                limit=contact_limit
+            )
+            for entity in contacts:
+                if not self._entity_in_list(entity.id, context.relevant_contacts):
+                    context.relevant_contacts.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching contacts: {e}")
+
+        # Get emails to show interaction history
+        try:
+            emails = await self.data_layer.structured_query(
+                filters={},
+                entity_type="email",
+                limit=10
+            )
+            for entity in emails:
+                if not self._entity_in_list(entity.id, context.relevant_emails):
+                    context.relevant_emails.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching emails: {e}")
+
+        # Get followups to show pending items with contacts
+        try:
+            followups = await self.data_layer.structured_query(
+                filters={"status": ["pending", "reminded", "escalated"]},
+                entity_type="followup",
+                limit=10
+            )
+            for entity in followups:
+                if not self._entity_in_list(entity.id, context.relevant_followups):
+                    context.relevant_followups.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching followups: {e}")
+
+    async def _enrich_chat_todo(
+        self,
+        context: SearchContext,
+        max_results: int
+    ) -> None:
+        """Enrich context for todo/task focused queries.
+
+        Note: Todos are stored in a separate table, not in the entity system.
+        For now, we provide meeting context (source of many action items)
+        and followup context (related to tasks).
+        """
+        # Meetings are a primary source of action items
+        try:
+            meetings = await self.data_layer.structured_query(
+                filters={},
+                entity_type="meeting",
+                limit=max_results
+            )
+            for entity in meetings:
+                if not self._entity_in_list(entity.id, context.relevant_meetings):
+                    context.relevant_meetings.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching meetings: {e}")
+
+        # Followups are related to tasks
+        try:
+            followups = await self.data_layer.structured_query(
+                filters={"status": ["pending", "reminded", "escalated"]},
+                entity_type="followup",
+                limit=max_results
+            )
+            for entity in followups:
+                if not self._entity_in_list(entity.id, context.relevant_followups):
+                    context.relevant_followups.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching followups: {e}")
+
+        # Light email context for task-related emails
+        try:
+            emails = await self.data_layer.structured_query(
+                filters={"is_unread": True},
+                entity_type="email",
+                limit=5
+            )
+            for entity in emails:
+                if not self._entity_in_list(entity.id, context.relevant_emails):
+                    context.relevant_emails.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.warning(f"Error fetching emails: {e}")
 
     async def _generate_temporal_summary(self, context: SearchContext) -> str:
         """Generate a natural language summary of temporal context."""

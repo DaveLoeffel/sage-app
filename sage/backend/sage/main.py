@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as redis
 
 from sage.config import get_settings
-from sage.api import auth, emails, followups, calendar, briefings, chat, dashboard, meetings
+from sage.api import auth, emails, followups, todos, calendar, briefings, chat, dashboard, meetings
 from sage.services.database import init_db, close_db
 from sage.scheduler.jobs import start_scheduler, stop_scheduler
 
@@ -56,6 +56,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(emails.router, prefix="/api/v1/emails", tags=["Emails"])
 app.include_router(followups.router, prefix="/api/v1/followups", tags=["Follow-ups"])
+app.include_router(todos.router, prefix="/api/v1/todos", tags=["Todos"])
 app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["Calendar"])
 app.include_router(briefings.router, prefix="/api/v1/briefings", tags=["Briefings"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])

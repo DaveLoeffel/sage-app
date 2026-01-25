@@ -790,3 +790,181 @@ async def cache_meeting_details(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to cache meeting: {str(e)}",
         )
+
+
+# ============== Meeting Review for Action Items ==============
+
+
+@router.post("/review/all")
+async def review_all_meetings_for_actions(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days_back: int = Query(default=30, le=90),
+    create_entries: bool = Query(default=True),
+) -> dict:
+    """
+    Review all meetings from the last N days and extract action items.
+
+    This scans both Fireflies meetings and Plaud recordings, using AI to extract:
+    - Todos for Dave (things he committed to do)
+    - Follow-ups (things Dave is waiting on from others)
+
+    Args:
+        days_back: Number of days to look back (default: 30, max: 90)
+        create_entries: Whether to create todo/followup database entries
+
+    Returns:
+        Summary of review progress and items created
+    """
+    from sage.services.meeting_reviewer import MeetingReviewService
+
+    service = MeetingReviewService(user_email=user.email)
+
+    progress = await service.review_all_meetings(
+        db=db,
+        user_id=user.id,
+        days_back=days_back,
+        create_entries=create_entries,
+    )
+
+    return {
+        "message": f"Reviewed {progress.reviewed}/{progress.total_meetings} meetings",
+        "total_meetings": progress.total_meetings,
+        "reviewed": progress.reviewed,
+        "todos_created": progress.todos_created,
+        "followups_created": progress.followups_created,
+        "errors": progress.errors,
+        "by_source": progress.meetings_by_source,
+    }
+
+
+@router.post("/review/{meeting_id}")
+async def review_single_meeting(
+    meeting_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    create_entries: bool = Query(default=True),
+) -> dict:
+    """
+    Review a single Fireflies meeting and extract action items.
+
+    Args:
+        meeting_id: The Fireflies meeting ID
+        create_entries: Whether to create todo/followup database entries
+
+    Returns:
+        Extracted action items and creation results
+    """
+    from sage.services.meeting_reviewer import MeetingReviewService
+
+    service = MeetingReviewService(user_email=user.email)
+
+    result = await service.review_fireflies_meeting(
+        db=db,
+        meeting_id=meeting_id,
+        user_id=user.id,
+        create_entries=create_entries,
+    )
+
+    if result.error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.error,
+        )
+
+    return {
+        "meeting_id": result.meeting_id,
+        "meeting_title": result.meeting_title,
+        "meeting_date": result.meeting_date.isoformat() if result.meeting_date else None,
+        "source": result.source,
+        "action_items": [
+            {
+                "description": item.description,
+                "type": item.item_type.value,
+                "assignee": item.assignee,
+                "assignee_email": item.assignee_email,
+                "due_date": item.due_date.isoformat() if item.due_date else None,
+                "due_date_text": item.due_date_text,
+                "priority": item.priority,
+                "context": item.context,
+                "confidence": item.confidence,
+            }
+            for item in result.action_items
+        ],
+        "todos_created": result.todos_created,
+        "followups_created": result.followups_created,
+    }
+
+
+@router.post("/review/plaud/{recording_id}")
+async def review_plaud_recording_for_actions(
+    recording_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    create_entries: bool = Query(default=True),
+) -> dict:
+    """
+    Review a single Plaud recording and extract action items.
+
+    Args:
+        recording_id: The email cache ID for the Plaud recording
+        create_entries: Whether to create todo/followup database entries
+
+    Returns:
+        Extracted action items and creation results
+    """
+    from sage.services.meeting_reviewer import MeetingReviewService
+
+    # Fetch the email
+    plaud_label_id = await _get_plaud_label_id(db)
+    result = await db.execute(
+        select(EmailCache).where(
+            EmailCache.id == recording_id,
+            _is_plaud_or_legacy_meeting_note(plaud_label_id),
+        )
+    )
+    email = result.scalar_one_or_none()
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plaud recording not found",
+        )
+
+    service = MeetingReviewService(user_email=user.email)
+
+    review_result = await service.review_plaud_recording(
+        db=db,
+        email=email,
+        user_id=user.id,
+        create_entries=create_entries,
+    )
+
+    if review_result.error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=review_result.error,
+        )
+
+    return {
+        "meeting_id": review_result.meeting_id,
+        "meeting_title": review_result.meeting_title,
+        "meeting_date": review_result.meeting_date.isoformat() if review_result.meeting_date else None,
+        "source": review_result.source,
+        "action_items": [
+            {
+                "description": item.description,
+                "type": item.item_type.value,
+                "assignee": item.assignee,
+                "assignee_email": item.assignee_email,
+                "due_date": item.due_date.isoformat() if item.due_date else None,
+                "due_date_text": item.due_date_text,
+                "priority": item.priority,
+                "context": item.context,
+                "confidence": item.confidence,
+            }
+            for item in review_result.action_items
+        ],
+        "todos_created": review_result.todos_created,
+        "followups_created": review_result.followups_created,
+    }

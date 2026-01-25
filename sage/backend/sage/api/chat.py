@@ -3,11 +3,18 @@
 This module implements Phase 3.9: Context-Aware Chat (RAG Integration).
 Before sending user messages to Claude, we retrieve relevant context from the
 database using SearchAgent, preventing hallucination of non-existent data.
+
+Phase 3.9.3 adds intent-based context optimization:
+- Detect query type (email, followup, meeting, contact, todo, general)
+- Extract entity hints (names, email addresses, subjects)
+- Prioritize relevant context based on detected intent
 """
 
 import logging
+import re
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -23,6 +30,162 @@ from sage.agents.base import SearchContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class ChatIntent(str, Enum):
+    """Types of user intents detected from chat messages."""
+    EMAIL = "email"           # Questions about emails
+    FOLLOWUP = "followup"     # Questions about followups
+    MEETING = "meeting"       # Questions about meetings/calendar
+    CONTACT = "contact"       # Questions about contacts/people
+    TODO = "todo"             # Questions about todos/tasks
+    GENERAL = "general"       # General questions
+
+
+def detect_chat_intent(message: str) -> ChatIntent:
+    """
+    Detect the primary intent from a user message.
+
+    Uses keyword matching to classify the query type, which determines
+    how context retrieval is prioritized.
+
+    Args:
+        message: The user's chat message
+
+    Returns:
+        ChatIntent enum indicating the detected intent type
+    """
+    message_lower = message.lower()
+
+    # Email-related patterns
+    email_patterns = [
+        r"\bemail", r"\bmail\b", r"\binbox\b", r"\bunread\b",
+        r"\bsent\b", r"message from", r"\bwrote\b", r"\breply\b",
+        r"\bforward\b", r"from .+@", r"subject:",
+    ]
+
+    # Follow-up related patterns
+    followup_patterns = [
+        r"follow.?up", r"\bwaiting\b", r"\boverdue\b", r"\bpending\b",
+        r"waiting for.*(response|reply)", r"haven.t heard",
+        r"need.*(response|reply)", r"remind\b", r"heard back",
+    ]
+
+    # Meeting/calendar related patterns
+    meeting_patterns = [
+        r"\bmeeting", r"\bcalendar\b", r"\bschedule\b", r"\bevent\b",
+        r"\bcall\b", r"\bzoom\b", r"\bappointment\b", r"today's",
+        r"tomorrow", r"this week", r"next week", r"\btranscript\b",
+    ]
+
+    # Contact/people related patterns
+    contact_patterns = [
+        r"who is", r"tell me about .+ (person|contact)",
+        r"what do (i|you) know about", r"relationship with",
+        r"contact info", r"how do i reach",
+    ]
+
+    # Todo/task related patterns
+    todo_patterns = [
+        r"\btodo", r"\bto.?do\b", r"\btask", r"action item",
+        r"need to do", r"what should i", r"my tasks",
+        r"what's on my plate",
+    ]
+
+    # Score each intent by counting pattern matches
+    def count_matches(patterns: list[str], text: str) -> int:
+        return sum(1 for p in patterns if re.search(p, text, re.IGNORECASE))
+
+    scores = {
+        ChatIntent.EMAIL: count_matches(email_patterns, message_lower),
+        ChatIntent.FOLLOWUP: count_matches(followup_patterns, message_lower),
+        ChatIntent.MEETING: count_matches(meeting_patterns, message_lower),
+        ChatIntent.CONTACT: count_matches(contact_patterns, message_lower),
+        ChatIntent.TODO: count_matches(todo_patterns, message_lower),
+    }
+
+    # Return highest scoring intent, or GENERAL if no strong match
+    max_score = max(scores.values())
+    if max_score == 0:
+        return ChatIntent.GENERAL
+
+    return max(scores, key=scores.get)
+
+
+def extract_entity_hints(message: str) -> list[str]:
+    """
+    Extract potential entity hints from a user message.
+
+    Looks for:
+    - Email addresses
+    - Names (capitalized words that look like names)
+    - Quoted strings (likely subjects or exact phrases)
+
+    Args:
+        message: The user's chat message
+
+    Returns:
+        List of extracted entity hints for search
+    """
+    hints = []
+
+    # Extract email addresses
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    emails = re.findall(email_pattern, message)
+    hints.extend(emails)
+
+    # Extract quoted strings (potential subjects or exact phrases)
+    quoted_pattern = r'"([^"]+)"'
+    quoted = re.findall(quoted_pattern, message)
+    hints.extend(quoted)
+
+    # Also check for single-quoted strings
+    single_quoted_pattern = r"'([^']+)'"
+    single_quoted = re.findall(single_quoted_pattern, message)
+    hints.extend(single_quoted)
+
+    # Extract potential names (2-3 capitalized words together)
+    # Skip common words that might be capitalized at start of sentences
+    common_words = {
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'what', 'when',
+        'where', 'who', 'how', 'why', 'can', 'could', 'would', 'should',
+        'do', 'does', 'did', 'have', 'has', 'had', 'show', 'tell', 'find',
+        'get', 'give', 'i', 'my', 'me', 'today', 'tomorrow', 'yesterday',
+    }
+
+    # Pattern for potential names: 2-3 capitalized words
+    name_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b'
+    potential_names = re.findall(name_pattern, message)
+
+    for name in potential_names:
+        # Skip if it's just a common word at the start of a sentence
+        words = name.lower().split()
+        if not all(w in common_words for w in words):
+            hints.append(name)
+
+    # Extract "from X" patterns (e.g., "emails from John")
+    from_pattern = r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)'
+    from_matches = re.findall(from_pattern, message)
+    hints.extend(from_matches)
+
+    # Extract "about X" patterns (e.g., "emails about the project")
+    about_pattern = r'about\s+(?:the\s+)?([A-Za-z]+(?:\s+[A-Za-z]+){0,3})'
+    about_matches = re.findall(about_pattern, message, re.IGNORECASE)
+    for match in about_matches:
+        if match.lower() not in common_words:
+            hints.append(match)
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_hints = []
+    for hint in hints:
+        hint_lower = hint.lower()
+        if hint_lower not in seen and len(hint) > 2:
+            seen.add(hint_lower)
+            unique_hints.append(hint)
+
+    logger.debug(f"Extracted entity hints from message: {unique_hints}")
+    return unique_hints
 
 # In-memory conversation turn tracking (could be moved to Redis for production)
 _conversation_turns: dict[str, int] = {}
@@ -127,6 +290,10 @@ async def get_chat_context(
     This is the core of Phase 3.9 - it calls SearchAgent.search_for_task()
     to get real data from the database before sending to Claude.
 
+    Phase 3.9.3 adds:
+    - Intent detection to prioritize relevant context types
+    - Entity hints extraction to improve search accuracy
+
     Args:
         db: Database session
         user_message: The user's chat message
@@ -140,17 +307,29 @@ async def get_chat_context(
         data_layer = DataLayerService(session=db)
         search_agent = SearchAgent(data_layer=data_layer)
 
-        # Determine what types of context to retrieve based on the message
-        # This is a simple heuristic - the full Orchestrator will do better intent recognition
-        entity_hints = []
+        # Phase 3.9.3: Detect intent from user message
+        intent = detect_chat_intent(user_message)
+        logger.info(f"Detected chat intent: {intent.value}")
 
-        # Extract potential entity hints from the message
-        # (names, email addresses, subjects mentioned)
-        # For now, we rely on SearchAgent's semantic search
+        # Phase 3.9.3: Extract entity hints (names, emails, subjects)
+        entity_hints = extract_entity_hints(user_message)
+        logger.info(f"Extracted {len(entity_hints)} entity hints: {entity_hints[:5]}")
 
-        # Call SearchAgent to get context
+        # Map intent to agent type for context prioritization
+        # The SearchAgent will use this to enrich with the right data types
+        intent_to_agent = {
+            ChatIntent.EMAIL: "chat_email",
+            ChatIntent.FOLLOWUP: "chat_followup",
+            ChatIntent.MEETING: "chat_meeting",
+            ChatIntent.CONTACT: "chat_contact",
+            ChatIntent.TODO: "chat_todo",
+            ChatIntent.GENERAL: "chat",
+        }
+        requesting_agent = intent_to_agent.get(intent, "chat")
+
+        # Call SearchAgent to get context with intent-based prioritization
         context = await search_agent.search_for_task(
-            requesting_agent="chat",
+            requesting_agent=requesting_agent,
             task_description=user_message,
             entity_hints=entity_hints if entity_hints else None,
             max_results=15,  # Balance between context richness and token usage
@@ -169,8 +348,12 @@ async def get_chat_context(
         # Format for Claude
         formatted = format_search_context(context)
 
-        # Add instructions for Claude
-        formatted["instructions"] = (
+        # Add intent information for debugging/logging
+        formatted["detected_intent"] = intent.value
+        formatted["entity_hints_used"] = entity_hints[:10] if entity_hints else []
+
+        # Add instructions for Claude - customize based on intent
+        base_instructions = (
             "The above data is from the user's actual database. "
             "Use ONLY this data when answering questions about emails, contacts, "
             "follow-ups, meetings, or past conversations. "
@@ -181,8 +364,20 @@ async def get_chat_context(
             "Always display times in Eastern Time format (e.g., '3:30 PM ET')."
         )
 
+        # Add intent-specific guidance
+        intent_guidance = {
+            ChatIntent.EMAIL: " Focus on the email data provided. Summarize emails clearly with sender, subject, and date.",
+            ChatIntent.FOLLOWUP: " Focus on follow-up items. Highlight overdue items and how long they've been waiting.",
+            ChatIntent.MEETING: " Focus on meeting/calendar data. Include meeting times, attendees, and any action items.",
+            ChatIntent.CONTACT: " Focus on contact information and their interaction history.",
+            ChatIntent.TODO: " Focus on todo items and tasks. Group by priority or due date if helpful.",
+            ChatIntent.GENERAL: "",
+        }
+
+        formatted["instructions"] = base_instructions + intent_guidance.get(intent, "")
+
         logger.info(
-            f"Retrieved context for chat: "
+            f"Retrieved context for chat (intent={intent.value}): "
             f"{len(formatted.get('emails', []))} emails, "
             f"{len(formatted.get('contacts', []))} contacts, "
             f"{len(formatted.get('followups', []))} followups, "

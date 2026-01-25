@@ -43,13 +43,17 @@ class Followup(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     user: Mapped["User"] = relationship(back_populates="followups")
 
-    # Email reference
+    # Email reference (nullable for meeting-based followups)
     email_id: Mapped[int | None] = mapped_column(
         ForeignKey("email_cache.id"), nullable=True
     )
-    gmail_id: Mapped[str] = mapped_column(String(255), index=True)
-    thread_id: Mapped[str] = mapped_column(String(255), index=True)
+    gmail_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     subject: Mapped[str] = mapped_column(String(500))
+
+    # Source tracking (where the followup came from)
+    source_type: Mapped[str] = mapped_column(String(50), default="email")  # email, meeting
+    source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # meeting_id if from meeting
 
     # Contact info
     contact_email: Mapped[str] = mapped_column(String(255), index=True)

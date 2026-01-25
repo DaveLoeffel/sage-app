@@ -11,8 +11,9 @@ export default function EmailsPage() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<string>('')
   const [priority, setPriority] = useState<string>('')
-  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [unreadOnly, setUnreadOnly] = useState(true)
   const [page, setPage] = useState(1)
+  const [syncing, setSyncing] = useState(false)
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['emails', { search, category, priority, unreadOnly, page }],
@@ -29,6 +30,18 @@ export default function EmailsPage() {
         .then((res) => res.data),
   })
 
+  const handleSync = async () => {
+    setSyncing(true)
+    try {
+      await emailsApi.sync()
+      await refetch()
+    } catch (error) {
+      console.error('Failed to sync emails:', error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -38,11 +51,16 @@ export default function EmailsPage() {
           <p className="text-gray-500">Manage your inbox with AI assistance</p>
         </div>
         <button
-          onClick={() => refetch()}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          onClick={handleSync}
+          disabled={syncing}
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <RefreshCw className="h-4 w-4" />
-          Sync
+          {syncing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          {syncing ? 'Syncing...' : 'Sync'}
         </button>
       </div>
 

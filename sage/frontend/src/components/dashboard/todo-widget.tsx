@@ -78,13 +78,13 @@ export function TodoWidget() {
               <span className="text-red-600 ml-2">({grouped?.total_overdue} overdue)</span>
             )}
           </div>
-          <a
+          <Link
             href="/todos"
             className="flex items-center text-sm text-blue-600 hover:text-blue-700"
           >
             View all
             <ChevronRight className="ml-1 h-4 w-4" />
-          </a>
+          </Link>
         </div>
       </div>
 

@@ -25,21 +25,23 @@ class FollowupBase(BaseModel):
     """Base follow-up schema."""
 
     subject: str
-    contact_email: EmailStr
+    contact_email: str  # Allow any string (empty for some meeting-based followups)
     contact_name: str | None = None
     priority: FollowupPriority = FollowupPriority.NORMAL
     due_date: datetime
     notes: str | None = None
-    escalation_email: EmailStr | None = None
+    escalation_email: str | None = None  # Allow any string or None
     escalation_days: int = 7
 
 
 class FollowupCreate(FollowupBase):
     """Schema for creating a follow-up."""
 
-    gmail_id: str
-    thread_id: str
+    gmail_id: str | None = None  # Nullable for meeting-based followups
+    thread_id: str | None = None  # Nullable for meeting-based followups
     email_id: int | None = None
+    source_type: str = "email"
+    source_id: str | None = None
 
 
 class FollowupUpdate(BaseModel):
@@ -58,8 +60,8 @@ class FollowupResponse(FollowupBase):
 
     id: int
     user_id: int
-    gmail_id: str
-    thread_id: str
+    gmail_id: str | None = None  # Nullable for meeting-based followups
+    thread_id: str | None = None  # Nullable for meeting-based followups
     email_id: Optional[int] = None
     status: FollowupStatus
     ai_summary: str | None = None
@@ -69,6 +71,10 @@ class FollowupResponse(FollowupBase):
     completed_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+
+    # Source tracking (where the followup came from)
+    source_type: str = "email"  # email, meeting
+    source_id: str | None = None  # meeting_id if from meeting
 
     # Computed fields
     is_overdue: bool = False

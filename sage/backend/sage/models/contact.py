@@ -35,7 +35,11 @@ class Contact(Base):
 
     # Categorization
     category: Mapped[ContactCategory] = mapped_column(
-        SQLEnum(ContactCategory), default=ContactCategory.OTHER
+        SQLEnum(
+            ContactCategory,
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=ContactCategory.OTHER
     )
 
     # Escalation chain (for follow-up escalation)

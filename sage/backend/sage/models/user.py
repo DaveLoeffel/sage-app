@@ -11,6 +11,7 @@ from sage.services.database import Base
 if TYPE_CHECKING:
     from sage.models.followup import Followup
     from sage.models.meeting import MeetingNote
+    from sage.models.todo import TodoItem
 
 
 class User(Base):
@@ -42,3 +43,4 @@ class User(Base):
     # Relationships
     followups: Mapped[list["Followup"]] = relationship(back_populates="user")
     meeting_notes: Mapped[list["MeetingNote"]] = relationship(back_populates="user")
+    todos: Mapped[list["TodoItem"]] = relationship(back_populates="user")

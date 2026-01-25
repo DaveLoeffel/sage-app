@@ -1,9 +1,9 @@
 # Sage Implementation Roadmap
 ## Session-by-Session Progress Tracker
 
-**Last Updated:** January 22, 2026
-**Current Phase:** Context-Aware Chat (Phase 3.9) ✅ FUNCTIONAL
-**Next Session Focus:** Intent-based context optimization OR Sage Orchestrator (Phase 4)
+**Last Updated:** January 24, 2026
+**Current Phase:** Context-Aware Chat (Phase 3.9) - Testing
+**Next Session Focus:** Test Phase 3.9 functionality (see phase-3.9-testing-guide.md)
 
 ---
 
@@ -21,7 +21,7 @@
 | Behavioral Analysis | **COMPLETE** | 100% |
 | Voice Profile Training | **COMPLETE** | 100% |
 | Follow-up Detection | **COMPLETE** | 100% |
-| **Context-Aware Chat (RAG)** | ✅ FUNCTIONAL | 75% |
+| **Context-Aware Chat (RAG)** | ✅ FUNCTIONAL | 90% |
 | Sage Orchestrator | STUBBED | 10% |
 | Task Agents (10) | STUBBED | 15% |
 | TodoList Agent | **COMPLETE** | 100% |
@@ -246,19 +246,24 @@
 - [x] Include relevant memories for conversation continuity
 - [x] Add clear instructions for Claude to use only provided data
 
-#### 3.9.3 Intent-Based Context Optimization
+#### 3.9.3 Intent-Based Context Optimization ✅ COMPLETE
 - [x] Detect general queries → use balanced context retrieval (emails + followups)
-- [ ] Detect email-related queries → prioritize email context
-- [ ] Detect follow-up queries → prioritize follow-up context
-- [ ] Detect meeting queries → prioritize meeting/calendar context
-- [ ] Add entity hints extraction from user message (names, subjects, etc.)
+- [x] Detect email-related queries → prioritize email context
+- [x] Detect follow-up queries → prioritize follow-up context
+- [x] Detect meeting queries → prioritize meeting/calendar context
+- [x] Detect contact queries → prioritize contact context
+- [x] Detect todo queries → prioritize todo/meeting context
+- [x] Add entity hints extraction from user message (names, emails, subjects)
 
-#### 3.9.4 Testing & Validation ✅ COMPLETE
+#### 3.9.4 Testing & Validation (IN PROGRESS)
 - [x] Test: "Show me emails from [real contact]" returns real emails
 - [x] Test: "What follow-ups are overdue?" returns actual follow-ups
 - [x] Test: System says "I don't have that information" for non-existent data
 - [ ] Test: "What did we discuss about [topic]?" retrieves memories
 - [ ] Test: Multi-turn conversation maintains context
+- [ ] Test: Intent detection for all 6 intent types
+- [ ] Test: Entity hints extraction (names, emails, subjects)
+- [ ] Complete testing guide: [phase-3.9-testing-guide.md](phase-3.9-testing-guide.md)
 
 **Expected Outcome:** Chat responses are grounded in real data from the database. Users can ask about their emails, contacts, follow-ups and get accurate answers.
 
@@ -1009,6 +1014,64 @@
 1. Implement intent-based context optimization (prioritize based on query type)
 2. Add entity hints extraction (names, subjects from user message)
 3. Continue with Sage Orchestrator (Phase 4) for full multi-agent coordination
+
+---
+
+### Session 10: January 22, 2026
+**Duration:** ~30 minutes
+**Focus:** Phase 3.9.3 - Intent-Based Context Optimization
+
+**Completed:**
+
+1. **Implemented Intent Detection:**
+   - Created `ChatIntent` enum with 6 intent types: EMAIL, FOLLOWUP, MEETING, CONTACT, TODO, GENERAL
+   - Created `detect_chat_intent()` function using regex pattern matching
+   - Scores messages against keyword patterns for each intent type
+   - Falls back to GENERAL if no strong match
+
+2. **Implemented Entity Hints Extraction:**
+   - Created `extract_entity_hints()` function to extract search hints from messages
+   - Extracts email addresses (regex pattern)
+   - Extracts quoted strings (potential subjects or exact phrases)
+   - Extracts potential names (capitalized word sequences)
+   - Extracts "from X" and "about X" patterns
+   - Filters common words to reduce noise
+
+3. **Updated Chat Context Retrieval:**
+   - `get_chat_context()` now calls `detect_chat_intent()` and `extract_entity_hints()`
+   - Maps intents to agent types for SearchAgent (e.g., EMAIL → chat_email)
+   - Adds intent-specific guidance to Claude's instructions
+   - Logs detected intent and extracted hints for debugging
+
+4. **Updated SearchAgent Enrichment:**
+   - Added 6 new enrichment methods for intent-based context:
+     - `_enrich_chat_general()` - Balanced context (original behavior)
+     - `_enrich_chat_email()` - Prioritizes email data with 2x limit
+     - `_enrich_chat_followup()` - Prioritizes followup data with 2x limit
+     - `_enrich_chat_meeting()` - Prioritizes meeting/calendar data
+     - `_enrich_chat_contact()` - Prioritizes contact and interaction history
+     - `_enrich_chat_todo()` - Prioritizes meeting and followup context (todo source)
+   - Updated `_enrich_for_agent()` to route to appropriate method
+
+5. **Testing:**
+   - All 36 SearchAgent unit tests passing
+   - Intent detection correctly classifies 13/14 test messages (93%)
+   - Entity extraction successfully extracts emails, names, and quoted phrases
+
+**Files Modified:**
+- `sage/backend/sage/api/chat.py` - Added intent detection, entity extraction (~140 lines)
+- `sage/backend/sage/agents/foundational/search.py` - Added intent-based enrichment (~200 lines)
+- `sage-implementation-roadmap.md` - Updated status, added session log
+
+**Key Design Decisions:**
+- Intent detection uses simple regex patterns (fast, no API calls)
+- Each intent type gets prioritized context (2x limit for primary data type)
+- Entity hints are passed to SearchAgent for improved semantic search
+- Intent-specific guidance added to Claude's system instructions
+
+**Next Session Should:**
+1. Continue with Sage Orchestrator (Phase 4) for full multi-agent coordination
+2. Or implement Clarifier Agent (Phase 3.8) for ambiguous email detection
 
 ---
 
