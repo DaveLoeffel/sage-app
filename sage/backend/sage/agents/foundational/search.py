@@ -13,6 +13,7 @@ See sage-agent-architecture.md Section 3.1 for specifications.
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -187,26 +188,11 @@ class SearchAgent(BaseAgent):
             elif entity.entity_type == "memory":
                 context.relevant_memories.append(entity_dict)
 
-        # 2. If entity hints provided, fetch those directly
+        # 2. If entity hints provided, use them to enhance search
+        # Entity hints are names, email addresses, or keywords - NOT entity IDs
         if entity_hints:
             for hint in entity_hints:
-                # Try to fetch as entity ID first
-                entity = await self.data_layer.get_entity(hint)
-                if entity:
-                    entity_dict = self._entity_to_dict(entity)
-                    self._add_entity_to_context(context, entity, entity_dict)
-
-                    # Traverse relationships for this entity
-                    relationships = await self.data_layer.get_relationships(hint)
-                    for rel in relationships:
-                        # Add to relationship graph
-                        if hint not in context.relationship_graph:
-                            context.relationship_graph[hint] = []
-                        context.relationship_graph[hint].append({
-                            "to": rel.to_id if rel.from_id == hint else rel.from_id,
-                            "type": rel.rel_type,
-                            "metadata": rel.metadata
-                        })
+                await self._process_entity_hint(context, hint, max_results)
 
         # 3. Agent-specific context enrichment
         await self._enrich_for_agent(context, requesting_agent, max_results)
@@ -570,6 +556,121 @@ class SearchAgent(BaseAgent):
                     context.relevant_emails.append(self._entity_to_dict(entity))
         except Exception as e:
             logger.warning(f"Error fetching emails: {e}")
+
+    async def _process_entity_hint(
+        self,
+        context: SearchContext,
+        hint: str,
+        max_results: int
+    ) -> None:
+        """
+        Process an entity hint to enhance search context.
+
+        Entity hints are extracted from user messages and can be:
+        - Email addresses (e.g., "john@example.com")
+        - Names (e.g., "Laura Hodgson")
+        - Keywords or phrases
+
+        This method uses hints for targeted searches, NOT direct entity lookups.
+        Entity IDs have the format "type_id" (e.g., "contact_123").
+        """
+        hint = hint.strip()
+        if not hint:
+            return
+
+        logger.debug(f"Processing entity hint: {hint}")
+
+        # Check if hint looks like an email address
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if re.match(email_pattern, hint):
+            await self._search_by_email(context, hint, max_results)
+            return
+
+        # Check if hint looks like an actual entity ID (format: type_id)
+        entity_id_pattern = r'^(email|contact|followup|meeting|memory)_[a-zA-Z0-9_-]+$'
+        if re.match(entity_id_pattern, hint):
+            try:
+                entity = await self.data_layer.get_entity(hint)
+                if entity:
+                    entity_dict = self._entity_to_dict(entity)
+                    self._add_entity_to_context(context, entity, entity_dict)
+                    return
+            except Exception as e:
+                logger.debug(f"Entity ID lookup failed for {hint}: {e}")
+
+        # For names and other keywords, use semantic search
+        # This is more robust than trying to do structured lookups
+        await self._search_by_keyword(context, hint, max_results)
+
+    async def _search_by_email(
+        self,
+        context: SearchContext,
+        email_address: str,
+        max_results: int
+    ) -> None:
+        """Search for entities related to an email address."""
+        try:
+            # Search for emails from this sender
+            emails = await self.data_layer.structured_query(
+                filters={"sender_email": email_address},
+                entity_type="email",
+                limit=max_results
+            )
+            for entity in emails:
+                if not self._entity_in_list(entity.id, context.relevant_emails):
+                    context.relevant_emails.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.debug(f"Email search by sender failed: {e}")
+
+        try:
+            # Search for contacts with this email
+            contacts = await self.data_layer.structured_query(
+                filters={"email": email_address},
+                entity_type="contact",
+                limit=5
+            )
+            for entity in contacts:
+                if not self._entity_in_list(entity.id, context.relevant_contacts):
+                    context.relevant_contacts.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.debug(f"Contact search by email failed: {e}")
+
+        try:
+            # Search for followups with this contact
+            followups = await self.data_layer.structured_query(
+                filters={"contact_email": email_address},
+                entity_type="followup",
+                limit=max_results
+            )
+            for entity in followups:
+                if not self._entity_in_list(entity.id, context.relevant_followups):
+                    context.relevant_followups.append(self._entity_to_dict(entity))
+        except Exception as e:
+            logger.debug(f"Followup search by contact failed: {e}")
+
+    async def _search_by_keyword(
+        self,
+        context: SearchContext,
+        keyword: str,
+        max_results: int
+    ) -> None:
+        """Search for entities matching a keyword using semantic search."""
+        try:
+            # Use semantic search which is more flexible for names/keywords
+            results = await self.semantic_search(
+                query=keyword,
+                entity_types=None,  # Search all types
+                limit=max_results // 2,  # Limit per hint to avoid overwhelming context
+                score_threshold=0.4  # Slightly higher threshold for hint-based searches
+            )
+
+            for result in results:
+                entity = result.entity
+                entity_dict = self._entity_to_dict(entity, result.score)
+                self._add_entity_to_context(context, entity, entity_dict)
+
+        except Exception as e:
+            logger.debug(f"Semantic search for keyword '{keyword}' failed: {e}")
 
     async def _generate_temporal_summary(self, context: SearchContext) -> str:
         """Generate a natural language summary of temporal context."""

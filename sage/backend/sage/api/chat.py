@@ -13,13 +13,16 @@ Phase 3.9.3 adds intent-based context optimization:
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from sage.services.database import get_db
 from sage.schemas.chat import ChatRequest, ChatResponse
@@ -27,8 +30,181 @@ from sage.core.claude_agent import get_claude_agent
 from sage.services.data_layer.service import DataLayerService
 from sage.agents.foundational.search import SearchAgent
 from sage.agents.base import SearchContext
+from sage.api.auth import get_current_user
+from sage.models.user import User
+from sage.config import get_settings
+
+settings = get_settings()
+
+# Timezone constants
+EASTERN_TZ = ZoneInfo("America/New_York")
+UTC_TZ = ZoneInfo("UTC")
+
+
+def format_datetime_eastern(dt_value: str | datetime | None) -> str | None:
+    """
+    Convert a datetime value to Eastern Time formatted string.
+
+    Args:
+        dt_value: A datetime object, ISO format string, or None
+
+    Returns:
+        Formatted string like "Jan 27, 2026 3:30 PM ET" or None if input is None
+    """
+    if dt_value is None:
+        return None
+
+    try:
+        # Parse string to datetime if needed
+        if isinstance(dt_value, str):
+            # Handle various ISO formats
+            dt_value = dt_value.replace("Z", "+00:00")
+            if "+" not in dt_value and "T" in dt_value:
+                # Assume UTC if no timezone specified
+                dt_value = dt_value + "+00:00"
+            dt = datetime.fromisoformat(dt_value)
+        else:
+            dt = dt_value
+
+        # If datetime is naive (no timezone), assume UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC_TZ)
+
+        # Convert to Eastern Time
+        dt_eastern = dt.astimezone(EASTERN_TZ)
+
+        # Format as readable string
+        return dt_eastern.strftime("%b %d, %Y %I:%M %p ET")
+
+    except (ValueError, TypeError) as e:
+        # If parsing fails, return original value as string
+        return str(dt_value) if dt_value else None
+
 
 logger = logging.getLogger(__name__)
+
+
+def get_calendar_events_for_chat(
+    user: User,
+    days_ahead: int = 1,
+    days_behind: int = 0,
+) -> list[dict]:
+    """
+    Fetch calendar events from Google Calendar for chat context.
+
+    Args:
+        user: The current user with Google credentials
+        days_ahead: Number of days ahead to fetch (default: 1 for today)
+        days_behind: Number of days behind to fetch (default: 0)
+
+    Returns:
+        List of formatted calendar event dicts for chat context
+    """
+    if not user or not user.google_access_token:
+        logger.debug("No Google access token, skipping calendar fetch")
+        return []
+
+    try:
+        credentials = Credentials(
+            token=user.google_access_token,
+            refresh_token=user.google_refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=settings.google_client_id,
+            client_secret=settings.google_client_secret,
+        )
+
+        service = build("calendar", "v3", credentials=credentials)
+
+        # Calculate time range
+        now = datetime.now(EASTERN_TZ)
+        start_time = (now - timedelta(days=days_behind)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        end_time = (now + timedelta(days=days_ahead)).replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
+
+        # Convert to UTC for API call
+        start_utc = start_time.astimezone(UTC_TZ)
+        end_utc = end_time.astimezone(UTC_TZ)
+
+        events_result = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=start_utc.isoformat(),
+                timeMax=end_utc.isoformat(),
+                maxResults=20,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
+        )
+
+        events = events_result.get("items", [])
+        calendar_events = []
+
+        for event in events:
+            # Handle all-day events vs timed events
+            start = event.get("start", {})
+            end = event.get("end", {})
+
+            if "dateTime" in start:
+                start_dt = datetime.fromisoformat(
+                    start["dateTime"].replace("Z", "+00:00")
+                )
+            else:
+                # All-day event
+                start_dt = datetime.fromisoformat(start.get("date", ""))
+                start_dt = start_dt.replace(hour=0, minute=0, tzinfo=EASTERN_TZ)
+
+            if "dateTime" in end:
+                end_dt = datetime.fromisoformat(
+                    end["dateTime"].replace("Z", "+00:00")
+                )
+            else:
+                end_dt = datetime.fromisoformat(end.get("date", ""))
+                end_dt = end_dt.replace(hour=23, minute=59, tzinfo=EASTERN_TZ)
+
+            # Extract attendees
+            attendees = []
+            for attendee in event.get("attendees", []):
+                email = attendee.get("email", "")
+                name = attendee.get("displayName", email)
+                attendees.append(name if name else email)
+
+            # Extract meeting link
+            meeting_link = None
+            conference_data = event.get("conferenceData", {})
+            entry_points = conference_data.get("entryPoints", [])
+            for entry in entry_points:
+                if entry.get("entryPointType") == "video":
+                    meeting_link = entry.get("uri")
+                    break
+            if not meeting_link:
+                meeting_link = event.get("hangoutLink")
+
+            calendar_events.append({
+                "id": event.get("id", ""),
+                "title": event.get("summary", "No Title"),
+                "start": format_datetime_eastern(start_dt),
+                "end": format_datetime_eastern(end_dt),
+                "location": event.get("location"),
+                "attendees": attendees[:10] if attendees else None,
+                "description": (event.get("description") or "")[:200],
+                "meeting_link": meeting_link,
+                "is_all_day": "date" in start and "dateTime" not in start,
+            })
+
+        logger.info(f"Fetched {len(calendar_events)} calendar events for chat")
+        return calendar_events
+
+    except HttpError as e:
+        logger.error(f"Google Calendar API error in chat: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Error fetching calendar events for chat: {e}")
+        return []
 router = APIRouter()
 
 
@@ -146,19 +322,39 @@ def extract_entity_hints(message: str) -> list[str]:
 
     # Extract potential names (2-3 capitalized words together)
     # Skip common words that might be capitalized at start of sentences
+    # Extended list to avoid false positives from common English words
     common_words = {
-        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'what', 'when',
-        'where', 'who', 'how', 'why', 'can', 'could', 'would', 'should',
-        'do', 'does', 'did', 'have', 'has', 'had', 'show', 'tell', 'find',
-        'get', 'give', 'i', 'my', 'me', 'today', 'tomorrow', 'yesterday',
+        # Articles, pronouns, basic verbs
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'what', 'when', 'where', 'who', 'how', 'why', 'which', 'that', 'this',
+        'can', 'could', 'would', 'should', 'will', 'shall', 'may', 'might',
+        'do', 'does', 'did', 'have', 'has', 'had', 'i', 'my', 'me', 'we', 'us',
+        'you', 'your', 'he', 'she', 'it', 'they', 'them', 'their', 'our',
+        # Common action words that start sentences
+        'show', 'tell', 'find', 'get', 'give', 'list', 'help', 'please',
+        'let', 'make', 'see', 'look', 'check', 'search', 'display', 'view',
+        # Common words that might be capitalized
+        'hello', 'hi', 'hey', 'thanks', 'thank', 'yes', 'no', 'ok', 'okay',
+        'summarize', 'summary', 'detail', 'details', 'more', 'first', 'last',
+        'next', 'previous', 'one', 'two', 'three', 'all', 'any', 'some',
+        'recent', 'new', 'old', 'latest', 'earliest', 'important', 'urgent',
+        # Time-related
+        'today', 'tomorrow', 'yesterday', 'monday', 'tuesday', 'wednesday',
+        'thursday', 'friday', 'saturday', 'sunday', 'week', 'month', 'year',
+        'morning', 'afternoon', 'evening', 'night', 'day', 'days',
+        # Common nouns that aren't names
+        'email', 'emails', 'message', 'messages', 'meeting', 'meetings',
+        'calendar', 'task', 'tasks', 'todo', 'todos', 'followup', 'followups',
+        'contact', 'contacts', 'schedule', 'inbox', 'draft', 'drafts',
     }
 
-    # Pattern for potential names: 2-3 capitalized words
-    name_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b'
+    # Pattern for potential names: REQUIRE 2+ capitalized words (not just 1)
+    # Single capitalized words are usually not names
+    name_pattern = r'\b([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b'
     potential_names = re.findall(name_pattern, message)
 
     for name in potential_names:
-        # Skip if it's just a common word at the start of a sentence
+        # Skip if all words are common words
         words = name.lower().split()
         if not all(w in common_words for w in words):
             hints.append(name)
@@ -199,8 +395,7 @@ def format_search_context(context: SearchContext) -> dict:
     in real data from the database, preventing hallucination.
     """
     # Use Eastern Time as the user's default timezone
-    eastern = ZoneInfo("America/New_York")
-    now_eastern = datetime.now(eastern)
+    now_eastern = datetime.now(EASTERN_TZ)
 
     formatted = {
         "user_timezone": "America/New_York (Eastern Time)",
@@ -218,7 +413,7 @@ def format_search_context(context: SearchContext) -> dict:
                 "subject": email.get("subject"),
                 "sender": email.get("sender_name") or email.get("sender_email"),
                 "sender_email": email.get("sender_email"),
-                "date": email.get("received_at"),
+                "date": format_datetime_eastern(email.get("received_at")),
                 "snippet": (email.get("snippet") or email.get("body_text", ""))[:200],
                 "category": email.get("category"),
                 "priority": email.get("priority"),
@@ -249,7 +444,7 @@ def format_search_context(context: SearchContext) -> dict:
                 "contact_name": followup.get("contact_name"),
                 "contact_email": followup.get("contact_email"),
                 "status": followup.get("status"),
-                "due_date": followup.get("due_date"),
+                "due_date": format_datetime_eastern(followup.get("due_date")),
                 "days_waiting": followup.get("days_waiting"),
             })
 
@@ -257,10 +452,11 @@ def format_search_context(context: SearchContext) -> dict:
     if context.relevant_meetings:
         formatted["meetings"] = []
         for meeting in context.relevant_meetings[:5]:
+            meeting_date = meeting.get("start_time") or meeting.get("meeting_date")
             formatted["meetings"].append({
                 "id": meeting.get("id"),
                 "title": meeting.get("title") or meeting.get("subject"),
-                "date": meeting.get("start_time") or meeting.get("meeting_date"),
+                "date": format_datetime_eastern(meeting_date),
                 "attendees": meeting.get("attendees", [])[:5],  # Limit attendees
                 "summary": meeting.get("summary"),
             })
@@ -270,7 +466,7 @@ def format_search_context(context: SearchContext) -> dict:
         formatted["past_conversations"] = []
         for memory in context.relevant_memories[:5]:
             formatted["past_conversations"].append({
-                "date": memory.get("created_at"),
+                "date": format_datetime_eastern(memory.get("created_at")),
                 "user_message": memory.get("user_message"),
                 "sage_response": (memory.get("sage_response") or "")[:300],
                 "relevance": memory.get("relevance_score"),
@@ -283,6 +479,7 @@ async def get_chat_context(
     db: AsyncSession,
     user_message: str,
     conversation_id: str | None = None,
+    user: User | None = None,
 ) -> dict | None:
     """
     Retrieve relevant context for a chat message using SearchAgent.
@@ -294,10 +491,14 @@ async def get_chat_context(
     - Intent detection to prioritize relevant context types
     - Entity hints extraction to improve search accuracy
 
+    Phase 3.9.4 adds:
+    - Live Google Calendar integration for meeting queries
+
     Args:
         db: Database session
         user_message: The user's chat message
         conversation_id: Optional conversation ID for memory retrieval
+        user: Optional user for Google Calendar access
 
     Returns:
         Formatted context dict, or None if retrieval fails
@@ -348,6 +549,29 @@ async def get_chat_context(
         # Format for Claude
         formatted = format_search_context(context)
 
+        # Phase 3.9.4: Fetch live calendar data for meeting queries
+        if intent == ChatIntent.MEETING and user:
+            live_calendar = get_calendar_events_for_chat(
+                user=user,
+                days_ahead=7,  # Show a week of upcoming meetings
+                days_behind=1,  # Also show yesterday for context
+            )
+            if live_calendar:
+                # Replace indexed meetings with live calendar data
+                formatted["live_calendar"] = live_calendar
+                formatted["calendar_source"] = "Google Calendar (live)"
+                logger.info(f"Added {len(live_calendar)} live calendar events to context")
+        elif intent == ChatIntent.GENERAL and user:
+            # For general queries, also include today's calendar
+            live_calendar = get_calendar_events_for_chat(
+                user=user,
+                days_ahead=1,  # Just today
+                days_behind=0,
+            )
+            if live_calendar:
+                formatted["todays_calendar"] = live_calendar
+                formatted["calendar_source"] = "Google Calendar (live)"
+
         # Add intent information for debugging/logging
         formatted["detected_intent"] = intent.value
         formatted["entity_hints_used"] = entity_hints[:10] if entity_hints else []
@@ -376,12 +600,14 @@ async def get_chat_context(
 
         formatted["instructions"] = base_instructions + intent_guidance.get(intent, "")
 
+        calendar_count = len(formatted.get('live_calendar', [])) or len(formatted.get('todays_calendar', []))
         logger.info(
             f"Retrieved context for chat (intent={intent.value}): "
             f"{len(formatted.get('emails', []))} emails, "
             f"{len(formatted.get('contacts', []))} contacts, "
             f"{len(formatted.get('followups', []))} followups, "
-            f"{len(formatted.get('meetings', []))} meetings, "
+            f"{len(formatted.get('meetings', []))} indexed meetings, "
+            f"{calendar_count} live calendar events, "
             f"{len(formatted.get('past_conversations', []))} memories"
         )
 
@@ -446,6 +672,7 @@ async def chat(
     request: ChatRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     background_tasks: BackgroundTasks,
+    user: Annotated[User, Depends(get_current_user)],
 ) -> ChatResponse:
     """Send a message to the AI assistant.
 
@@ -466,10 +693,12 @@ async def chat(
 
     # Phase 3.9: Retrieve relevant context from database BEFORE calling Claude
     # This prevents hallucination by giving Claude real data to work with
+    # Phase 3.9.4: Pass user for Google Calendar access
     context = await get_chat_context(
         db=db,
         user_message=request.message,
         conversation_id=conversation_id,
+        user=user,
     )
 
     # Merge with any context provided in the request
