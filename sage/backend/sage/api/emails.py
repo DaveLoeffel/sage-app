@@ -594,15 +594,38 @@ async def draft_reply(
 async def sync_emails(
     db: Annotated[AsyncSession, Depends(get_db)],
     max_results: int = Query(100, ge=1, le=500),
-    include_sent: bool = Query(False, description="Include sent mail, not just inbox"),
+    labels: list[str] = Query(
+        ["INBOX", "SENT"],
+        description="Gmail system labels to sync (e.g., INBOX, SENT)",
+    ),
+    custom_labels: list[str] = Query(
+        ["Signal"],
+        description="Custom Gmail labels to sync",
+    ),
 ) -> dict:
-    """Manually trigger email sync from Gmail."""
+    """Manually trigger email sync from Gmail.
+
+    Syncs emails from the specified labels:
+    - labels: Gmail system labels like INBOX, SENT
+    - custom_labels: Custom labels like Signal
+
+    Archive detection is preserved for INBOX emails.
+    """
     from sage.core.email_processor import EmailProcessor
 
     processor = EmailProcessor(db)
-    synced_count = await processor.sync_emails(max_results=max_results, include_sent=include_sent)
+    synced_count = await processor.sync_emails(
+        max_results=max_results,
+        labels=labels,
+        custom_labels=custom_labels,
+    )
 
-    return {"message": f"Synced {synced_count} emails", "count": synced_count}
+    return {
+        "message": f"Synced {synced_count} emails",
+        "count": synced_count,
+        "labels": labels,
+        "custom_labels": custom_labels,
+    }
 
 
 @router.get("/thread/{thread_id}", response_model=list[EmailResponse])

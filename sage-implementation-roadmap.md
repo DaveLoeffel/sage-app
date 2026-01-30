@@ -2,14 +2,17 @@
 ## Session-by-Session Progress Tracker
 
 **Last Updated:** January 29, 2026
-**Current Phase:** Phase 3.9 Complete - Data Cleanup in Progress
-**Next Session Focus:** Sync SENT emails (last sync: Dec 2025) to enable follow-up detection, then proceed to Phase 4 or 3.8
+**Current Phase:** Phase 3.9 Complete - Comprehensive Sync Implemented
+**Next Session Focus:** Test comprehensive sync across all data sources, then proceed to Phase 4 or 3.8
 
-### Immediate Task: Sync SENT Emails
-- Follow-up detection requires recent sent emails to find threads awaiting response
-- SENT folder last synced: December 18, 2025 (over a month stale)
-- Need to trigger SENT email sync before follow-up detection will work
-- After sync: re-run `POST /api/v1/followups/detect?days=3&user_email=dave@americancommunitybuilders.com`
+### Immediate Task: Comprehensive Data Sync ✅ COMPLETE
+- **Email Sync:** Now syncs INBOX + SENT + Signal-labeled emails (previously INBOX only)
+- **Archive Detection:** Preserved for INBOX emails (removes label when archived in Gmail)
+- **Configuration:** New settings in `config.py`:
+  - `email_sync_labels`: Gmail system labels to sync (default: ["INBOX", "SENT"])
+  - `email_sync_custom_labels`: Custom labels to sync (default: ["Signal"])
+- **API Update:** `/api/v1/emails/sync` now accepts `labels` and `custom_labels` parameters
+- **Scheduler:** 5-minute sync job now syncs all configured labels
 
 ---
 
@@ -24,6 +27,7 @@
 | Indexer Agent | **COMPLETE** | 100% |
 | Search Agent | **COMPLETE** | 100% |
 | Historical Data Import | **COMPLETE** | 100% |
+| **Email Sync (INBOX+SENT+Custom)** | **COMPLETE** | 100% |
 | Behavioral Analysis | **COMPLETE** | 100% |
 | Voice Profile Training | **COMPLETE** | 100% |
 | Follow-up Detection | **COMPLETE** | 100% |
@@ -1152,6 +1156,63 @@
 1. Continue with Sage Orchestrator (Phase 4) for full multi-agent coordination
 2. Or implement Clarifier Agent (Phase 3.8) for ambiguous email detection
 3. Clean up followups and todo databases (noted during testing)
+
+---
+
+### Session 12: January 29, 2026
+**Duration:** ~30 minutes
+**Focus:** Comprehensive Label Support for Email Sync
+
+**Problem Identified:**
+- Scheduled 5-minute sync only synced INBOX emails, missing SENT and Signal-labeled emails
+- Follow-up detection requires SENT emails to find threads awaiting response
+- SENT folder was stale (last synced December 2025)
+
+**Completed:**
+
+1. **Added Configuration for Sync Labels:**
+   - Added `email_sync_labels: list[str] = ["INBOX", "SENT"]` to config.py
+   - Added `email_sync_custom_labels: list[str] = ["Signal"]` to config.py
+   - These control which Gmail labels are synced on the 5-minute schedule
+
+2. **Refactored `EmailProcessor.sync_emails()`:**
+   - New signature: `sync_emails(max_results, labels, custom_labels)`
+   - Added `_fetch_message_ids_by_label()` for system labels (INBOX, SENT)
+   - Added `_fetch_message_ids_by_query()` for custom labels (label:Signal)
+   - Deduplicates message IDs across all sources before processing
+   - Preserved archive detection logic for INBOX emails
+
+3. **Updated Scheduler Job:**
+   - `email_sync_job()` now passes labels from settings
+   - All configured labels synced on same 5-minute schedule
+
+4. **Updated Manual Sync API Endpoint:**
+   - `POST /api/v1/emails/sync` now accepts `labels` and `custom_labels` parameters
+   - Defaults: labels=["INBOX", "SENT"], custom_labels=["Signal"]
+   - Response includes which labels were synced
+
+5. **Verified Dashboard Unread Count:**
+   - Already correctly filters for `is_unread AND INBOX label`
+   - No changes needed
+
+**Files Modified:**
+- `sage/backend/sage/config.py` - Added sync label settings (+2 lines)
+- `sage/backend/sage/core/email_processor.py` - Refactored sync_emails (+120 lines)
+- `sage/backend/sage/scheduler/jobs.py` - Updated job to use settings (+5 lines)
+- `sage/backend/sage/api/emails.py` - Updated /sync endpoint params (+15 lines)
+- `sage-implementation-roadmap.md` - Updated status and added session log
+
+**Key Design Decisions:**
+- Keep `is_unread` as raw Gmail state (UNREAD label present)
+- Use existing `needs_attention` property for "unread in inbox" semantics
+- System labels (INBOX, SENT) fetched via labelIds parameter
+- Custom labels (Signal) fetched via search query (q=label:Signal)
+- Archive detection only applies to INBOX (other labels don't have "archive" concept)
+
+**Next Session Should:**
+1. Test comprehensive sync with real data
+2. Continue with Sage Orchestrator (Phase 4)
+3. Or implement Clarifier Agent (Phase 3.8)
 
 ---
 

@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     # Email sync
     email_sync_interval_minutes: int = 5
     email_sync_max_results: int = 100
+    email_sync_labels: list[str] = ["INBOX", "SENT"]  # Gmail system labels to sync
+    email_sync_custom_labels: list[str] = ["Signal"]  # Custom labels to sync
 
     # Follow-up settings
     followup_reminder_days: int = 2

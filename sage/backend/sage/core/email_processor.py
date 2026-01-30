@@ -56,17 +56,31 @@ class EmailProcessor:
         self.db = db
         self.indexer_agent = indexer_agent
 
-    async def sync_emails(self, max_results: int = 100, include_sent: bool = False) -> int:
+    async def sync_emails(
+        self,
+        max_results: int = 100,
+        labels: list[str] | None = None,
+        custom_labels: list[str] | None = None,
+    ) -> int:
         """Sync emails from Gmail.
 
         Args:
-            max_results: Maximum number of emails to fetch
-            include_sent: If True, sync all mail; if False, only inbox
+            max_results: Maximum number of emails to fetch per label
+            labels: Gmail system labels to sync (e.g., ["INBOX", "SENT"])
+            custom_labels: Custom Gmail labels to sync (e.g., ["Signal"])
 
-        This method also handles emails that have been archived in Gmail by removing
-        the INBOX label from cached emails that are no longer in the Gmail inbox.
+        This method:
+        1. Fetches emails from all specified labels (system and custom)
+        2. Deduplicates emails that appear in multiple labels
+        3. Handles archive detection for INBOX emails
         """
         from sqlalchemy import text
+
+        # Default to INBOX only if no labels specified
+        if labels is None:
+            labels = ["INBOX"]
+        if custom_labels is None:
+            custom_labels = []
 
         # Get user with Google credentials
         result = await self.db.execute(select(User).limit(1))
@@ -87,10 +101,10 @@ class EmailProcessor:
             )
             service = build("gmail", "v1", credentials=credentials)
 
-            # Before syncing inbox, get all gmail_ids that currently have INBOX label in cache
+            # Before syncing, get all gmail_ids that currently have INBOX label in cache
             # We'll use this to detect emails that have been archived
             cached_inbox_ids: set[str] = set()
-            if not include_sent:
+            if "INBOX" in labels:
                 inbox_filter = text("labels @> ARRAY['INBOX']::varchar[]")
                 cached_inbox_result = await self.db.execute(
                     select(EmailCache.gmail_id).where(inbox_filter)
@@ -98,38 +112,37 @@ class EmailProcessor:
                 cached_inbox_ids = {row[0] for row in cached_inbox_result.fetchall()}
                 logger.debug(f"Found {len(cached_inbox_ids)} emails with INBOX label in cache")
 
-            # Fetch emails - either inbox only or all mail
-            list_params = {
-                "userId": "me",
-                "maxResults": min(max_results, 500),  # Gmail API max is 500
-            }
-            if not include_sent:
-                list_params["labelIds"] = ["INBOX"]
+            # Collect message IDs from all sources
+            all_message_ids: set[str] = set()
+            inbox_message_ids: set[str] = set()  # Track INBOX IDs separately for archive detection
 
-            all_messages = []
-            results = service.users().messages().list(**list_params).execute()
-            all_messages.extend(results.get("messages", []))
+            # Fetch from system labels (INBOX, SENT, etc.)
+            for label in labels:
+                label_ids = await self._fetch_message_ids_by_label(
+                    service, label, max_results
+                )
+                all_message_ids.update(label_ids)
+                if label == "INBOX":
+                    inbox_message_ids = label_ids
+                logger.info(f"Fetched {len(label_ids)} message IDs from {label}")
 
-            # Paginate if we need more and there are more pages
-            while len(all_messages) < max_results and "nextPageToken" in results:
-                list_params["pageToken"] = results["nextPageToken"]
-                list_params["maxResults"] = min(max_results - len(all_messages), 500)
-                results = service.users().messages().list(**list_params).execute()
-                all_messages.extend(results.get("messages", []))
+            # Fetch from custom labels using search query
+            for custom_label in custom_labels:
+                custom_ids = await self._fetch_message_ids_by_query(
+                    service, f"label:{custom_label}", max_results
+                )
+                all_message_ids.update(custom_ids)
+                logger.info(f"Fetched {len(custom_ids)} message IDs from label:{custom_label}")
 
-            logger.info(f"Found {len(all_messages)} messages to process")
+            logger.info(f"Total unique message IDs to process: {len(all_message_ids)}")
 
-            # Track which gmail_ids we see in the sync
-            synced_gmail_ids: set[str] = set()
-
+            # Process all unique messages
             synced_count = 0
-            for msg in all_messages[:max_results]:
-                synced_gmail_ids.add(msg["id"])
-
+            for msg_id in all_message_ids:
                 # Get full message details
                 email_data = service.users().messages().get(
                     userId="me",
-                    id=msg["id"],
+                    id=msg_id,
                     format="full",
                 ).execute()
 
@@ -137,10 +150,9 @@ class EmailProcessor:
                 if synced:
                     synced_count += 1
 
-            # After sync, handle emails that were in inbox but are no longer
-            # (i.e., they've been archived in Gmail)
-            if not include_sent and cached_inbox_ids:
-                archived_ids = cached_inbox_ids - synced_gmail_ids
+            # Handle archive detection: emails that were in INBOX but are no longer
+            if "INBOX" in labels and cached_inbox_ids:
+                archived_ids = cached_inbox_ids - inbox_message_ids
                 if archived_ids:
                     logger.info(f"Updating {len(archived_ids)} archived emails to remove INBOX label")
                     await self._remove_inbox_label_from_archived(archived_ids)
@@ -150,6 +162,76 @@ class EmailProcessor:
         except Exception as e:
             logger.error(f"Error syncing emails: {e}")
             raise
+
+    async def _fetch_message_ids_by_label(
+        self,
+        service,
+        label: str,
+        max_results: int,
+    ) -> set[str]:
+        """Fetch message IDs for a Gmail system label.
+
+        Args:
+            service: Gmail API service
+            label: Gmail label ID (e.g., "INBOX", "SENT")
+            max_results: Maximum number of IDs to fetch
+        """
+        message_ids: set[str] = set()
+
+        list_params = {
+            "userId": "me",
+            "maxResults": min(max_results, 500),  # Gmail API max is 500
+            "labelIds": [label],
+        }
+
+        results = service.users().messages().list(**list_params).execute()
+        for msg in results.get("messages", []):
+            message_ids.add(msg["id"])
+
+        # Paginate if we need more and there are more pages
+        while len(message_ids) < max_results and "nextPageToken" in results:
+            list_params["pageToken"] = results["nextPageToken"]
+            list_params["maxResults"] = min(max_results - len(message_ids), 500)
+            results = service.users().messages().list(**list_params).execute()
+            for msg in results.get("messages", []):
+                message_ids.add(msg["id"])
+
+        return message_ids
+
+    async def _fetch_message_ids_by_query(
+        self,
+        service,
+        query: str,
+        max_results: int,
+    ) -> set[str]:
+        """Fetch message IDs using a Gmail search query.
+
+        Args:
+            service: Gmail API service
+            query: Gmail search query (e.g., "label:Signal")
+            max_results: Maximum number of IDs to fetch
+        """
+        message_ids: set[str] = set()
+
+        list_params = {
+            "userId": "me",
+            "maxResults": min(max_results, 500),
+            "q": query,
+        }
+
+        results = service.users().messages().list(**list_params).execute()
+        for msg in results.get("messages", []):
+            message_ids.add(msg["id"])
+
+        # Paginate if we need more and there are more pages
+        while len(message_ids) < max_results and "nextPageToken" in results:
+            list_params["pageToken"] = results["nextPageToken"]
+            list_params["maxResults"] = min(max_results - len(message_ids), 500)
+            results = service.users().messages().list(**list_params).execute()
+            for msg in results.get("messages", []):
+                message_ids.add(msg["id"])
+
+        return message_ids
 
     async def _remove_inbox_label_from_archived(self, gmail_ids: set[str]) -> None:
         """Remove INBOX label from emails that have been archived in Gmail.

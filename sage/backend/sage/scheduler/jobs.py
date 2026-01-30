@@ -17,14 +17,22 @@ scheduler = AsyncIOScheduler()
 
 
 async def email_sync_job():
-    """Sync emails from Gmail every 5 minutes."""
+    """Sync emails from Gmail every 5 minutes.
+
+    Syncs from INBOX, SENT, and custom labels (e.g., Signal) as configured
+    in settings.email_sync_labels and settings.email_sync_custom_labels.
+    """
     logger.info("Starting email sync job")
     try:
         async with async_session_maker() as db:
             from sage.core.email_processor import EmailProcessor
 
             processor = EmailProcessor(db)
-            count = await processor.sync_emails(max_results=settings.email_sync_max_results)
+            count = await processor.sync_emails(
+                max_results=settings.email_sync_max_results,
+                labels=settings.email_sync_labels,
+                custom_labels=settings.email_sync_custom_labels,
+            )
             logger.info(f"Email sync completed: {count} new emails")
 
             # Also check for replies to close follow-ups
