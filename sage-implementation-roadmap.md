@@ -1,9 +1,15 @@
 # Sage Implementation Roadmap
 ## Session-by-Session Progress Tracker
 
-**Last Updated:** January 28, 2026
-**Current Phase:** Phase 3.9 Complete - Ready for Phase 4 (Orchestrator) or Phase 3.8 (Clarifier)
-**Next Session Focus:** Choose next phase: Sage Orchestrator (Phase 4) or Clarifier Agent (Phase 3.8)
+**Last Updated:** January 29, 2026
+**Current Phase:** Phase 3.9 Complete - Data Cleanup in Progress
+**Next Session Focus:** Sync SENT emails (last sync: Dec 2025) to enable follow-up detection, then proceed to Phase 4 or 3.8
+
+### Immediate Task: Sync SENT Emails
+- Follow-up detection requires recent sent emails to find threads awaiting response
+- SENT folder last synced: December 18, 2025 (over a month stale)
+- Need to trigger SENT email sync before follow-up detection will work
+- After sync: re-run `POST /api/v1/followups/detect?days=3&user_email=dave@americancommunitybuilders.com`
 
 ---
 
