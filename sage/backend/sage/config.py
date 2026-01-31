@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     morning_briefing_minute: int = 30
     timezone: str = "America/New_York"
 
+    # Orchestrator settings
+    use_orchestrator: bool = True  # Feature flag to enable orchestrator (vs direct Claude)
+
 
 @lru_cache
 def get_settings() -> Settings:

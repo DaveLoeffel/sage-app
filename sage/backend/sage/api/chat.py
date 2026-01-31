@@ -33,6 +33,7 @@ from sage.agents.base import SearchContext
 from sage.api.auth import get_current_user
 from sage.models.user import User
 from sage.config import get_settings
+from sage.agents.orchestrator import SageOrchestrator, PendingApproval
 
 settings = get_settings()
 
@@ -206,6 +207,22 @@ def get_calendar_events_for_chat(
         logger.error(f"Error fetching calendar events for chat: {e}")
         return []
 router = APIRouter()
+
+
+async def get_orchestrator(db: AsyncSession, user: User | None = None) -> SageOrchestrator:
+    """
+    Create and configure a SageOrchestrator instance.
+
+    Args:
+        db: Database session
+        user: Optional user (for future user-specific configuration)
+
+    Returns:
+        Configured SageOrchestrator instance
+    """
+    data_layer = DataLayerService(session=db)
+    orchestrator = SageOrchestrator(data_layer=data_layer)
+    return orchestrator
 
 
 class ChatIntent(str, Enum):
@@ -676,16 +693,51 @@ async def chat(
 ) -> ChatResponse:
     """Send a message to the AI assistant.
 
-    This endpoint implements Phase 3.9: Context-Aware Chat (RAG Integration).
-    Before sending the message to Claude, we retrieve relevant context from
-    the database using SearchAgent to prevent hallucination.
+    This endpoint supports two modes:
+    1. Orchestrator mode (use_orchestrator=True): Routes through SageOrchestrator
+       which handles intent detection, agent coordination, and response formatting.
+    2. Direct mode (use_orchestrator=False): Direct Claude integration with
+       SearchAgent context retrieval (Phase 3.9 implementation).
 
     Conversation memory is automatically persisted in the background.
     """
-    agent = await get_claude_agent()
-
     # Generate conversation ID if not provided
     conversation_id = request.conversation_id or str(uuid.uuid4())
+
+    # Check feature flag for orchestrator mode
+    if settings.use_orchestrator:
+        # Phase 4: Route through orchestrator
+        logger.info(f"Processing via orchestrator: {request.message[:50]}...")
+
+        orchestrator = await get_orchestrator(db, user)
+        orchestrator.set_conversation_id(conversation_id)
+
+        # Process through orchestrator
+        response = await orchestrator.process_message(request.message)
+
+        # Convert pending approvals to dict format for response
+        pending_approvals = [
+            {
+                "id": approval.id,
+                "agent": approval.agent,
+                "action": approval.action,
+                "description": approval.description,
+            }
+            for approval in response.pending_approvals
+        ] if response.pending_approvals else None
+
+        return ChatResponse(
+            message=response.text,
+            conversation_id=response.conversation_id or conversation_id,
+            pending_approvals=pending_approvals,
+        )
+
+    # =========================================================================
+    # Legacy flow (use_orchestrator=False) - preserved for rollback
+    # =========================================================================
+    logger.info("Processing via legacy direct Claude flow")
+
+    agent = await get_claude_agent()
 
     # Track turn number for this conversation
     turn_number = _conversation_turns.get(conversation_id, 0) + 1

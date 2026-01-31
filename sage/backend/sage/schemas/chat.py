@@ -37,3 +37,4 @@ class ChatResponse(BaseModel):
     conversation_id: str
     tool_calls: list[dict] | None = None  # MCP tool calls made
     suggestions: list[str] | None = None  # Suggested follow-up questions
+    pending_approvals: list[dict] | None = None  # Actions awaiting user approval
